@@ -1,0 +1,35 @@
+version: "3.9"
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: crawler_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  worker:
+    build: .
+    container_name: crawler_worker
+    depends_on: [redis]
+    shm_size: "1g" # increase shared memory
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+    volumes: ["./data:/app/data"]
+    command: >
+      celery -A app.tasks.celery_app worker --loglevel=INFO -Q crawl -c 4
+
+  app:
+    build: .
+    container_name: crawler_app
+    depends_on: [redis, worker]
+    shm_size: "1g"
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+    volumes: ["./data:/app/data"]
+    command: >
+      python -m app.main crawl --config 1900comvn
+
+volumes: { redis-data: {} }

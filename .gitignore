@@ -1,0 +1,6 @@
+#ignore
+# data/task/*.csv
+*.csv
+.git
+__pycache__
+.venv

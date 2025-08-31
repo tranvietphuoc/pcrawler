@@ -1,0 +1,74 @@
+# Default Configuration for Generic Crawler
+website:
+  name: "Default Website"
+  base_url: "https://example.com"
+  industries_page: "https://example.com/industries"
+
+xpath:
+  # Industry selection
+  industry_select: "//label[normalize-space()='Ngành']/following::span[contains(@class,'select2')][1]//span[contains(@class,'select2-selection')]"
+  industry_select_fallback: "//span[@id='select2-career_category_id-container']/ancestor::span[contains(@class,'selection')]//span[contains(@class,'select2-selection')]"
+  industry_results: "//ul[contains(@class,'select2-results__options')]"
+  industry_search: "//input[contains(@class,'select2-search__field')]"
+  industry_options: "//li[contains(@class,'select2-results__option') and not(contains(@class,'loading'))]"
+  
+  # Company details
+  company_name: "//h1[contains(@class,'company-detail-name')]/span[1]"
+  company_address: "//div[@class='box-body']//div[@class='item'][1]//div[@class='desc']"
+  company_address_fallback: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Trụ sở')]]/span"
+  company_website: "//div[@class='box-caption']/p//a[starts-with(@href,'http')]"
+  company_phone: "//div[@class='box-caption']/p//a[starts-with(@href,'tel:')]"
+  company_scale: "//div[contains(@class,'company-subdetail')]//div[contains(@class,'company-subdetail-info')][2]//span[2]"
+  company_created_year: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Thành lập')]]/span"
+  company_business: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Ngành')]]/a"
+  company_revenue: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Doanh thu')]]/span"
+  
+  # Social media
+  social_media_container: "//div[contains(@class,'social-media-container')]//a[contains(@href,'{platform}')]"
+  
+  # Pagination
+  pagination_links: "//li[@class='page-item']//a[@class='page-link']"
+  
+  # Company links
+  company_links: "a[href*='tong-quan']"
+  
+  # Filter button
+  filter_button: "//div[contains(@class,'d-none')]//button[contains(@class,'btn-company')]"
+
+crawl4ai:
+  website_query: "Extract business emails from Contact Us/About/footer sections. The email should not start with number or uuid like, domain not like uuid or number or dash like uuid-number-dash. The email should be a valid email address. If any invalid email, return None."
+  facebook_query: "Extract business emails from Facebook About/Intro/Contact sections. The email should not start with number or uuid like, domain not like uuid or number or dash like uuid-number-dash. The email should be a valid email address. If any invalid email, return None."
+
+processing:
+  batch_size: 20
+  write_batch_size: 100
+  max_concurrent_pages: 5
+  max_retries: 3
+  delay_range: [1, 3]
+  timeout: 120000
+  network_timeout: 30000
+
+output:
+  output_dir: "data/tasks"
+  final_output: "data/company_contacts.csv"
+  log_file: "crawler.log"
+
+fieldnames:
+  - industry_id
+  - industry_name
+  - name
+  - address
+  - website
+  - phone
+  - created_year
+  - bussiness
+  - revenue
+  - scale
+  - link
+  - facebook
+  - linkedin
+  - tiktok
+  - youtube
+  - instagram
+  - extracted_emails
+  - email_source

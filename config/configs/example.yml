@@ -1,0 +1,74 @@
+# Example Configuration for Another Website
+website:
+  name: "Example Website"
+  base_url: "https://example.com/companies"
+  industries_page: "https://example.com/industries"
+
+xpath:
+  # Industry selection (example for different structure)
+  industry_select: "//select[@id='industry-select']"
+  industry_select_fallback: "//div[@class='industry-dropdown']"
+  industry_results: "//ul[@class='industry-list']"
+  industry_search: "//input[@placeholder='Search industries']"
+  industry_options: "//li[@class='industry-option']"
+  
+  # Company details (example for different structure)
+  company_name: "//h1[@class='company-title']"
+  company_address: "//div[@class='address']"
+  company_address_fallback: "//span[@class='location']"
+  company_website: "//a[@class='website-link']"
+  company_phone: "//span[@class='phone']"
+  company_scale: "//div[@class='company-size']"
+  company_created_year: "//span[@class='founded-year']"
+  company_business: "//div[@class='business-type']"
+  company_revenue: "//span[@class='revenue']"
+  
+  # Social media (example for different structure)
+  social_media_container: "//div[@class='social-links']//a[contains(@href,'{platform}')]"
+  
+  # Pagination
+  pagination_links: "//a[@class='page-link']"
+  
+  # Company links
+  company_links: "a[href*='company-detail']"
+  
+  # Filter button
+  filter_button: "//button[@class='filter-btn']"
+
+crawl4ai:
+  website_query: "Extract business contact emails from the website."
+  facebook_query: "Extract business emails from Facebook page."
+
+processing:
+  batch_size: 15
+  write_batch_size: 50
+  max_concurrent_pages: 3
+  max_retries: 2
+  delay_range: [2, 5]
+  timeout: 60000
+  network_timeout: 15000
+
+output:
+  output_dir: "data/example_tasks"
+  final_output: "data/example_companies.csv"
+  log_file: "example_crawler.log"
+
+fieldnames:
+  - industry_id
+  - industry_name
+  - name
+  - address
+  - website
+  - phone
+  - created_year
+  - bussiness
+  - revenue
+  - scale
+  - link
+  - facebook
+  - linkedin
+  - tiktok
+  - youtube
+  - instagram
+  - extracted_emails
+  - email_source
