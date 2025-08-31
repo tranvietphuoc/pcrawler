@@ -76,7 +76,7 @@ class DetailCrawler:
                         "youtube": "N/A",
                         "instagram": "N/A",
                     }
-                await asyncio.sleep(random.uniform(2, 5))
+                await asyncio.sleep(random.uniform(3, 7))
 
     async def crawl_company_batch(self, urls: List[str]) -> List[Dict[str, Any]]:
         results = []
@@ -90,11 +90,30 @@ class DetailCrawler:
                     "--disable-gpu",
                     "--disable-web-security",
                     "--disable-features=VizDisplayCompositor",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-extensions",
                 ],
             )
+            
+            # Random user agents to avoid detection
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ]
+            
             context = await browser.new_context(
                 viewport={'width': 1280, 'height': 720},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                user_agent=random.choice(user_agents),
+                extra_http_headers={
+                    'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                }
             )
             sem = asyncio.Semaphore(self.max_concurrent_pages)
 
@@ -106,13 +125,16 @@ class DetailCrawler:
                     finally:
                         await page.close()
 
-            # Process in smaller chunks to avoid memory issues
-            chunk_size = min(20, len(urls))
+            # Process in smaller chunks to avoid memory issues and reduce detection
+            chunk_size = min(15, len(urls))
             for i in range(0, len(urls), chunk_size):
                 chunk_urls = urls[i:i + chunk_size]
                 batch = await asyncio.gather(
                     *[_one(u) for u in chunk_urls], return_exceptions=True
                 )
+                # Add random delay between chunks to avoid detection
+                if i + chunk_size < len(urls):
+                    await asyncio.sleep(random.uniform(5, 10))
                 for r in batch:
                     results.append(
                         r
