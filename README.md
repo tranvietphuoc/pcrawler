@@ -123,7 +123,6 @@ output:
   final_output: "data/companies.csv"
 
 fieldnames:
-  - industry_id
   - industry_name
   # ... các field khác
 ```
@@ -132,9 +131,9 @@ fieldnames:
 
 ### Fields trong CSV:
 
-- `industry_id`, `industry_name`: Thông tin ngành
+- `industry_name`: Thông tin ngành
 - `name`, `address`, `website`, `phone`: Thông tin cơ bản công ty
-- `created_year`, `bussiness`, `revenue`, `scale`: Thông tin kinh doanh
+- `created_year`, `revenue`, `scale`: Thông tin kinh doanh
 - `link`, `facebook`, `linkedin`, `tiktok`, `youtube`, `instagram`: Social media
 - `extracted_emails`: Email được extract (phân cách bằng "; ")
 - `email_source`: Nguồn email (Facebook/Website/N/A)

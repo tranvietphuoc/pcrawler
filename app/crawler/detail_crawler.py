@@ -43,7 +43,6 @@ class DetailCrawler:
                 phone = phone.replace("tel:", "") if phone else "N/A"
                 scale = await page.locator(self.config.get_xpath("company_scale")).text_content()
                 created_year = await page.locator(self.config.get_xpath("company_created_year")).text_content()
-                bussiness_industry = await page.locator(self.config.get_xpath("company_business")).text_content()
                 revenue = await page.locator(self.config.get_xpath("company_revenue")).text_content()
                 return {
                     "name": clean(name),
@@ -51,7 +50,6 @@ class DetailCrawler:
                     "website": clean(website) if website else "N/A",
                     "phone": clean(phone),
                     "created_year": clean(created_year),
-                    "bussiness": clean(bussiness_industry),
                     "revenue": clean(revenue),
                     "scale": clean(scale) if scale else "N/A",
                     "link": url,
@@ -69,7 +67,6 @@ class DetailCrawler:
                         "website": "N/A",
                         "phone": "N/A",
                         "created_year": "N/A",
-                        "bussiness": "N/A",
                         "revenue": "N/A",
                         "scale": "N/A",
                         "link": url,
@@ -116,7 +113,6 @@ class DetailCrawler:
                         "website": "N/A",
                         "phone": "N/A",
                         "created_year": "N/A",
-                        "bussiness": "N/A",
                         "revenue": "N/A",
                         "scale": "N/A",
                         "link": "N/A",

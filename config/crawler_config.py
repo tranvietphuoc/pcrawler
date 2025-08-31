@@ -170,7 +170,7 @@ class CrawlerConfig:
                 errors.append("fieldnames must be a non-empty list")
             else:
                 # Check for required fields
-                required_fields = ["industry_id", "industry_name", "name", "extracted_emails", "email_source"]
+                required_fields = ["industry_name", "name", "extracted_emails", "email_source"]
                 for field in required_fields:
                     if field not in fieldnames:
                         errors.append(f"Missing required fieldname: {field}")

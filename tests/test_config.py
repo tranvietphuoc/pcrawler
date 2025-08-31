@@ -68,7 +68,7 @@ class TestCrawlerConfig:
         fieldnames = config.fieldnames
         assert isinstance(fieldnames, list)
         assert len(fieldnames) > 0
-        assert "industry_id" in fieldnames
+        assert "industry_name" in fieldnames
         assert "name" in fieldnames
     
     def test_get_xpath(self):

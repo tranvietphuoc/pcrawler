@@ -60,7 +60,6 @@ async def run(
             
             result = crawl_details_extract_write.delay(
                 batch_links,
-                ind_id,
                 ind_name,
                 output_dir,
                 task_id,

@@ -54,14 +54,12 @@ output:
   log_file: "crawler.log"
 
 fieldnames:
-  - industry_id
   - industry_name
   - name
   - address
   - website
   - phone
   - created_year
-  - bussiness
   - revenue
   - scale
   - link

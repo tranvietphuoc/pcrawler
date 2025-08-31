@@ -117,7 +117,6 @@ def filter_na_rows(rows: List[Dict], max_na_percentage: float = 0.7) -> List[Dic
 @celery_app.task(name="crawl.details_extract_write")
 def crawl_details_extract_write(
     links: List[str],
-    industry_id: str,
     industry_name: str,
     output_dir: str,
     task_id: str,
@@ -142,8 +141,7 @@ def crawl_details_extract_write(
 
         pending = []
         for d in rows:
-            # Add industry
-            d["industry_id"] = industry_id
+            # Add industry name only
             d["industry_name"] = industry_name
 
             # Clean phone number
