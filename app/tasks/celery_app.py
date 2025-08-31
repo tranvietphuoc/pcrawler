@@ -13,7 +13,7 @@ celery_app.conf.include = ["app.tasks.tasks"]
 # or:
 # celery_app.autodiscover_tasks(["app.tasks"])
 
-# (2) QUEUE & PREFETCH (nếu bạn dùng -Q crawl)
+# (2) QUEUE & PREFETCH (use -Q crawl)
 celery_app.conf.task_default_queue = "crawl"
 celery_app.conf.task_queues = (Queue("crawl"),)
 celery_app.conf.worker_prefetch_multiplier = 1

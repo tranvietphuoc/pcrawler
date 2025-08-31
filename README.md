@@ -317,6 +317,6 @@ docker-compose logs -f worker --tail=100
 
 ## Support
 
-- Email: your.email@example.com
+- Email: phuoctv.ut@gmail.com
 - Issues: [GitHub Issues](https://github.com/tranvietphuoc/pcrawler/issues)
 - Documentation: [Wiki](https://github.com/tranvietphuoc/pcrawler/wiki)
