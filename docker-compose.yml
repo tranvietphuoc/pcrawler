@@ -12,13 +12,13 @@ services:
     build: .
     container_name: crawler_worker
     depends_on: [redis]
-    shm_size: "1g" # increase shared memory
+    shm_size: "1g" # optimized for 4-core CPU
     environment:
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
     volumes: ["./data:/app/data"]
     command: >
-      celery -A app.tasks.celery_app worker --loglevel=INFO -Q crawl -c 4
+      celery -A app.tasks.celery_app worker --loglevel=INFO -Q crawl -c 4 --prefetch-multiplier=1
 
   app:
     build: .

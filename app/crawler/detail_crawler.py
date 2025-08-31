@@ -87,9 +87,15 @@ class DetailCrawler:
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-web-security",
+                    "--disable-features=VizDisplayCompositor",
                 ],
             )
-            context = await browser.new_context()
+            context = await browser.new_context(
+                viewport={'width': 1280, 'height': 720},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
             sem = asyncio.Semaphore(self.max_concurrent_pages)
 
             async def _one(u):
@@ -100,29 +106,33 @@ class DetailCrawler:
                     finally:
                         await page.close()
 
-            batch = await asyncio.gather(
-                *[_one(u) for u in urls], return_exceptions=True
-            )
-            for r in batch:
-                results.append(
-                    r
-                    if isinstance(r, dict)
-                    else {
-                        "name": "N/A",
-                        "address": "N/A",
-                        "website": "N/A",
-                        "phone": "N/A",
-                        "created_year": "N/A",
-                        "revenue": "N/A",
-                        "scale": "N/A",
-                        "link": "N/A",
-                        "facebook": "N/A",
-                        "linkedin": "N/A",
-                        "tiktok": "N/A",
-                        "youtube": "N/A",
-                        "instagram": "N/A",
-                    }
+            # Process in smaller chunks to avoid memory issues
+            chunk_size = min(20, len(urls))
+            for i in range(0, len(urls), chunk_size):
+                chunk_urls = urls[i:i + chunk_size]
+                batch = await asyncio.gather(
+                    *[_one(u) for u in chunk_urls], return_exceptions=True
                 )
+                for r in batch:
+                    results.append(
+                        r
+                        if isinstance(r, dict)
+                        else {
+                            "name": "N/A",
+                            "address": "N/A",
+                            "website": "N/A",
+                            "phone": "N/A",
+                            "created_year": "N/A",
+                            "revenue": "N/A",
+                            "scale": "N/A",
+                            "link": "N/A",
+                            "facebook": "N/A",
+                            "linkedin": "N/A",
+                            "tiktok": "N/A",
+                            "youtube": "N/A",
+                            "instagram": "N/A",
+                        }
+                    )
             await context.close()
             await browser.close()
         return results

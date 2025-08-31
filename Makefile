@@ -19,6 +19,10 @@ help:
 	@echo "  docker-up      Start Docker services"
 	@echo "  docker-down    Stop Docker services"
 	@echo "  docker-logs    Show Docker logs"
+	@echo "  docker-scale-1 Scale to 1 worker (conservative)"
+	@echo "  docker-scale-2 Scale to 2 workers (recommended)"
+	@echo "  docker-scale-3 Scale to 3 workers (aggressive)"
+	@echo "  docker-scale-4 Scale to 4 workers (maximum)"
 	@echo ""
 	@echo "Crawling:"
 	@echo "  crawl          Start crawling (default config)"
@@ -87,6 +91,29 @@ docker-down:
 docker-logs:
 	@echo "Showing Docker logs..."
 	docker-compose logs -f
+
+# Docker scaling
+docker-scale-workers:
+	@echo "Scaling workers..."
+	@read -p "Enter number of workers (default 4): " workers; \
+	workers=$${workers:-4}; \
+	docker-compose up --scale worker=$$workers -d
+
+docker-scale-1:
+	@echo "Scaling to 1 worker (conservative)..."
+	docker-compose up --scale worker=1 -d
+
+docker-scale-2:
+	@echo "Scaling to 2 workers (recommended)..."
+	docker-compose up --scale worker=2 -d
+
+docker-scale-3:
+	@echo "Scaling to 3 workers (aggressive)..."
+	docker-compose up --scale worker=3 -d
+
+docker-scale-4:
+	@echo "Scaling to 4 workers (maximum for your CPU)..."
+	docker-compose up --scale worker=4 -d
 
 # Crawling
 crawl:
