@@ -2,6 +2,8 @@
 
 > Hệ thống crawl dữ liệu công ty và email với kiến trúc modular, hỗ trợ nhiều website
 
+**🚀 Khuyến nghị: Sử dụng Makefile để dễ dàng quản lý và chạy ứng dụng**
+
 ## Quick Start
 
 ### Sử dụng Makefile (Khuyến nghị)
@@ -10,49 +12,76 @@
 # Xem tất cả commands có sẵn
 make help
 
-# Cài đặt dependencies
-make dev-install
-
-# Chạy với Docker (nhanh nhất)
-make quick-start
-
-# Hoặc từng bước
+# Setup và chạy nhanh nhất
 make docker-build
-make docker-up
-make docker-logs
+make docker-scale-2
+# Hoặc
+make docker-crawl
 ```
 
-### Sử dụng trực tiếp
+### Commands chính
 
 ```bash
-# Chạy với Docker
-docker-compose build
-docker-compose up -d
-docker-compose logs -f worker
-docker-compose logs -f app
+# Docker Setup
+make docker-build    # Build Docker images
+make docker-up       # Start services (Redis + Worker)
+make docker-down     # Stop all services
+make docker-logs     # Show logs
 
-# Hoặc chạy trực tiếp
-uv pip install -r requirements.txt
-uv run python -m app.main crawl --config 1900comvn
-```
-
-## CLI Commands
-
-```bash
 # Crawling
-uv run python -m app.main crawl --config 1900comvn
-uv run python -m app.main crawl --config 1900comvn --log-level DEBUG
+make crawl           # Start crawling (local)
+make docker-crawl    # Start crawling (Docker)
 
-# Configuration management
-uv run python -m app.main list-configs
-uv run python -m app.main validate --config 1900comvn
-uv run python -m app.main show-config --config 1900comvn
+# Scaling (tối ưu performance)
+make docker-scale-1  # Safe mode (1 worker) - Low risk, slower
+make docker-scale-2  # Fast mode (2 workers) - Balanced speed/risk
 
-# Development
-make test
-make lint
-make format
+# Manual
+make docker-merge    # Merge CSV files
 ```
+
+## Workflow
+
+### 1. Setup Docker
+
+```bash
+make docker-build    # Build images
+make docker-scale-2  # Start với 2 workers (tối ưu)
+```
+
+### 2. Start Crawling
+
+```bash
+make docker-crawl    # Bắt đầu crawl
+make docker-logs     # Xem logs real-time
+```
+
+### 3. Monitor Progress
+
+```bash
+make docker-logs     # Xem logs
+# Hoặc
+docker-compose logs -f worker
+```
+
+### 4. Merge Results (nếu cần)
+
+```bash
+make docker-merge    # Gộp tất cả CSV files
+```
+
+## Performance Tips
+
+### Scaling Options:
+
+- **Safe mode (1 worker)**: Ít rủi ro, chậm hơn
+- **Fast mode (2 workers)**: Cân bằng tốc độ/rủi ro (khuyến nghị)
+
+### Memory Management:
+
+- Tự động giới hạn RAM 3GB/worker
+- Garbage collection sau mỗi task
+- Worker restart định kỳ để tránh memory leak
 
 ## Kiến trúc
 
@@ -151,17 +180,12 @@ fieldnames:
 ### Setup Development Environment:
 
 ```bash
-# Cài đặt dependencies development
-make dev-install
+# Cài đặt dependencies
+source ./.venv/bin/activate.sh
+pip install -r requirements.txt
 
-# Chạy tests
-make test
-
-# Format code
-make format
-
-# Lint code
-make lint
+# Hoặc với uv
+uv pip install -r requirements.txt
 ```
 
 ### Project Structure:
@@ -189,17 +213,38 @@ pcrawler/
 ### Services:
 
 - `redis`: Message broker cho Celery
-- `worker`: Celery worker xử lý tasks
+- `worker`: Celery worker xử lý tasks (có thể scale)
 - `app`: Main application
+
+### Memory Limits:
+
+- **Worker**: 3GB RAM limit, 2GB reservation
+- **Max tasks per child**: 20 tasks (tự động restart)
+- **Max memory per child**: 2GB (tự động restart nếu vượt)
 
 ### Environment Variables:
 
 ```bash
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/0
+CELERY_WORKER_MAX_TASKS_PER_CHILD=20
+CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000
 ```
 
 ## Monitoring & Logging
+
+### Memory Monitoring:
+
+```bash
+# Xem logs với memory info
+make docker-logs
+
+# Memory logs sẽ hiển thị:
+# [MEMORY][Task xxx] start: 150 MB
+# [MEMORY][Task xxx] after GC: 120 MB (freed ~30 MB)
+# [MEMORY][Batch] before: 200 MB
+# [MEMORY][Batch] after GC: 180 MB (freed ~20 MB)
+```
 
 ### Log Levels:
 
@@ -208,14 +253,17 @@ CELERY_RESULT_BACKEND=redis://redis:6379/0
 - `WARNING`: Cảnh báo
 - `ERROR`: Lỗi
 
-### Log Files:
+### Docker Logs:
 
 ```bash
-# Chạy với log file
-uv run python -m app.main crawl --config 1900comvn --log-file crawler.log
-
-# Xem Docker logs
+# Xem tất cả logs
 make docker-logs
+
+# Xem logs worker
+docker-compose logs -f worker
+
+# Xem logs app
+docker-compose logs -f app
 ```
 
 ## Error Handling
@@ -257,14 +305,14 @@ make docker-logs
 ### Code Style:
 
 ```bash
-# Format code trước khi commit
-make format
+# Format code (nếu có black)
+uv run black .
 
-# Check linting
-make lint
+# Check linting (nếu có flake8)
+uv run flake8 .
 
-# Run tests
-make test
+# Run tests (nếu có pytest)
+uv run pytest
 ```
 
 ## License
@@ -278,9 +326,9 @@ MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 1. **Docker không start:**
 
    ```bash
-   docker-compose down
-   docker-compose build --no-cache
-   docker-compose up -d
+   make docker-down
+   make docker-build
+   make docker-scale-2
    ```
 
 2. **Celery worker không nhận tasks:**
@@ -293,25 +341,37 @@ MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
    docker-compose restart worker
    ```
 
-3. **Config validation failed:**
+3. **Memory usage cao:**
 
    ```bash
-   # Validate config
-   uv run python -m app.main validate --config your_config
+   # Xem memory logs
+   make docker-logs | grep MEMORY
 
-   # Show config details
-   uv run python -m app.main show-config --config your_config
+   # Worker sẽ tự restart sau 20 tasks hoặc 2GB RAM
+   # Không cần can thiệp thủ công
+   ```
+
+4. **Crawl chậm:**
+
+   ```bash
+   # Tăng số workers
+   make docker-scale-2  # Thay vì docker-scale-1
+
+   # Hoặc scale cao hơn (cẩn thận)
+   docker-compose up --scale worker=4 -d
    ```
 
 ### Debug Mode:
 
 ```bash
-# Chạy với debug logging
-uv run python -m app.main crawl --config 1900comvn --log-level DEBUG
+# Xem logs chi tiết
+make docker-logs
 
-# Hoặc với Docker
-docker-compose up -d
+# Xem logs worker
 docker-compose logs -f worker --tail=100
+
+# Xem logs app
+docker-compose logs -f app --tail=100
 ```
 
 ## Support
