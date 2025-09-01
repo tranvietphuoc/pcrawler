@@ -11,14 +11,17 @@ services:
     build: .
     depends_on: [redis]
     shm_size: "1g" # optimized for 4-core CPU
+    mem_limit: "3g" # giới hạn RAM cứng cho worker
+    mem_reservation: "2g" # gợi ý mức RAM tối thiểu
     environment:
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       - CELERY_WORKER_HEARTBEAT=30
-      - CELERY_WORKER_MAX_TASKS_PER_CHILD=50
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=20
+      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000 # 2GB mỗi child
     volumes: ["./data:/app/data"]
     command: >
-      celery -A app.tasks.celery_app worker --loglevel=INFO -Q crawl -c 4 --prefetch-multiplier=1 --without-heartbeat
+      celery -A app.tasks.celery_app worker --loglevel=INFO -Q crawl -c 4 --prefetch-multiplier=1 --without-heartbeat --max-memory-per-child=2000000
 
   app:
     build: .

@@ -3,6 +3,8 @@ import os
 import csv
 import glob
 import re
+import gc
+import psutil
 from typing import List, Dict
 from .celery_app import celery_app
 from app.crawler.detail_crawler import DetailCrawler
@@ -125,7 +127,11 @@ def crawl_details_extract_write(
     write_batch_size: int = None,
 ) -> dict:
     """Crawl details + extract email + write CSV for each task."""
-    
+    # Memory monitoring
+    process = psutil.Process()
+    mem_before = process.memory_info().rss // (1024 * 1024)
+    print(f"[MEMORY][Task {task_id}] start: {mem_before} MB")
+
     # Load config
     config = CrawlerConfig(config_name)
     max_concurrent_pages = max_concurrent_pages or config.processing_config["max_concurrent_pages"]
@@ -177,7 +183,11 @@ def crawl_details_extract_write(
             # Expand emails before writing
             expanded_pending = expand_emails(pending)
             safe_append_rows_csv(task_file, expanded_pending, config.get_fieldnames())
-        
+        # Memory cleanup
+        gc.collect()
+        mem_after = process.memory_info().rss // (1024 * 1024)
+        print(f"[MEMORY][Task {task_id}] after GC: {mem_after} MB (freed ~{max(0, mem_before - mem_after)} MB)")
+
         return {
             "task_id": task_id,
             "file_path": task_file,

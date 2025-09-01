@@ -1,7 +1,8 @@
-import asyncio, random, logging
+import asyncio, random, logging, gc
 from typing import List, Dict, Any
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
+import psutil
 
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,11 @@ class DetailCrawler:
                 await asyncio.sleep(random.uniform(3, 7))
 
     async def crawl_company_batch(self, urls: List[str]) -> List[Dict[str, Any]]:
+        # Memory monitoring
+        process = psutil.Process()
+        mem_before = process.memory_info().rss // (1024 * 1024)
+        print(f"[MEMORY][Batch] before: {mem_before} MB")
+
         results = []
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -157,4 +163,8 @@ class DetailCrawler:
                     )
             await context.close()
             await browser.close()
+        # Memory cleanup
+        gc.collect()
+        mem_after = process.memory_info().rss // (1024 * 1024)
+        print(f"[MEMORY][Batch] after GC: {mem_after} MB (freed ~{max(0, mem_before - mem_after)} MB)")
         return results
