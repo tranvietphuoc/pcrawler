@@ -143,9 +143,14 @@ crawl4ai:
   facebook_query: "Extract business emails from Facebook"
 
 processing:
-  batch_size: 20
-  max_concurrent_pages: 5
-  write_batch_size: 100
+  batch_size: 30
+  write_batch_size: 150
+  max_concurrent_pages: 6
+  max_retries: 2
+  delay_range: [1.5, 3.0]
+  timeout: 60000
+  network_timeout: 20000
+  stealth_mode: true
 
 output:
   output_dir: "data/tasks"
