@@ -43,8 +43,17 @@ class EmailExtractor:
         self.email_patterns = [
             r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
             r"[\w\.-]+@[\w\.-]+\.[A-Za-z]{2,}",
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
         ]
-        self.invalid_email = [r"noreply@", r"no-reply@", r"example\.com", r"@\d+\.\d+"]
+        self.invalid_email = [
+            r"^noreply@", 
+            r"^no-reply@", 
+            r"^example\.com$", 
+            r"^test@", 
+            r"^admin@", 
+            r"^info@.*\.test$"
+        ]
         
         self._initialized = True
 
@@ -73,16 +82,25 @@ class EmailExtractor:
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
             
-        # Sử dụng timeout riêng cho email extraction
-        email_timeout = self.config.processing_config.get("email_extraction_timeout", 45000)
+        base_timeout = self.config.processing_config.get("email_extraction_timeout", 45000)
         email_retry_delay = self.config.processing_config.get("email_retry_delay", [4, 10])
+        
+        timeout_strategy = [
+            min(base_timeout * 0.4, 20000),    # 20s - nhanh nhất
+            min(base_timeout * 0.6, 35000),    # 35s - trung bình
+            min(base_timeout * 0.8, 50000),    # 50s - chậm hơn
+            min(base_timeout * 1.0, 65000),    # 65s - chậm
+            min(base_timeout * 1.2, 80000)     # 80s - chậm nhất
+        ]
         
         for i in range(self.max_retries):
             try:
-                # Tăng timeout cho mạng chậm
+                current_timeout = timeout_strategy[i] / 1000
+                print(f"[EmailExtractor] Attempt {i+1}/{self.max_retries} with timeout {current_timeout:.1f}s")
+                
                 res = await asyncio.wait_for(
                     self.crawler.arun(url=url, query=query),
-                    timeout=email_timeout / 1000  # Convert to seconds
+                    timeout=current_timeout
                 )
                 
                 content = (
@@ -91,7 +109,7 @@ class EmailExtractor:
                     or str(res)
                 )
                 
-                if not content or len(content.strip()) < 100:
+                if not content or len(content.strip()) < 50:  # Giảm từ 100 xuống 50
                     print(f"[EmailExtractor] Content too short for {url}: {len(content or '')} chars")
                     continue
                 
@@ -102,21 +120,30 @@ class EmailExtractor:
                 else:
                     print(f"[EmailExtractor] No valid emails found in content from {url}")
                 
-                # Sử dụng delay riêng cho email retry
-                delay = random.uniform(email_retry_delay[0], email_retry_delay[1])
-                print(f"[EmailExtractor] Retrying in {delay:.1f}s... (attempt {i+1}/{self.max_retries})")
-                await asyncio.sleep(delay)
-                
+                if i < self.max_retries - 1:
+                    delay = random.uniform(
+                        email_retry_delay[0] * (i + 1), 
+                        min(email_retry_delay[1] * (i + 1), 15)  # Max 15s delay
+                    )
+                    print(f"[EmailExtractor] Retrying in {delay:.1f}s... (attempt {i+1}/{self.max_retries})")
+                    await asyncio.sleep(delay)
+                    
             except asyncio.TimeoutError:
                 print(f"[EmailExtractor] Timeout for {url} (attempt {i+1}/{self.max_retries})")
                 if i < self.max_retries - 1:
-                    delay = random.uniform(email_retry_delay[0], email_retry_delay[1])
+                    delay = random.uniform(
+                        email_retry_delay[0] * (i + 1), 
+                        min(email_retry_delay[1] * (i + 1), 15)
+                    )
                     await asyncio.sleep(delay)
                 continue
             except Exception as e:
                 print(f"[EmailExtractor] Crawl attempt {i+1} failed for {url}: {e}")
                 if i < self.max_retries - 1:
-                    delay = random.uniform(email_retry_delay[0], email_retry_delay[1])
+                    delay = random.uniform(
+                        email_retry_delay[0] * (i + 1), 
+                        min(email_retry_delay[1] * (i + 1), 15)
+                    )
                     await asyncio.sleep(delay)
                 continue
         
@@ -125,26 +152,25 @@ class EmailExtractor:
 
     async def _crawl_with_fallback(self, url: str, query: str):
         """Thử crawl với fallback strategies"""
-        # Method 1: crawl4ai với timeout dài
+        # Method 1: Progressive timeout
         result = await self._crawl(url, query)
         if result:
             return result
         
-        # Method 2: Thử với timeout ngắn hơn
         try:
-            print(f"[EmailExtractor] Trying fallback method for {url}")
+            print(f"[EmailExtractor] Trying quick fallback for {url}")
             result = await asyncio.wait_for(
                 self.crawler.arun(url=url, query=query),
-                timeout=30  # 30 seconds timeout
+                timeout=25  #25s - nhanh nhưng đủ để lấy content
             )
             content = getattr(result, "text", None) or getattr(result, "content", None) or str(result)
-            if content:
+            if content and len(content.strip()) > 50:  # Giảm requirement
                 emails = self.extract_emails_from_text(content)
                 if emails:
-                    print(f"[EmailExtractor] Fallback successful: {len(emails)} emails")
+                    print(f"[EmailExtractor] Quick fallback successful: {len(emails)} emails")
                     return emails
         except Exception as e:
-            print(f"[EmailExtractor] Fallback failed: {e}")
+            print(f"[EmailExtractor] Quick fallback failed: {e}")
         
         return None
 

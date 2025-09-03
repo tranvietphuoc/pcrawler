@@ -65,9 +65,9 @@ processing:
   industry_scroll_timeout: 90000  # Giữ nguyên
   industry_retry_delay: 3  # Giữ nguyên
   # Email extraction settings
-  email_extraction_timeout: 45000  # Giữ nguyên
+  email_extraction_timeout: 80000  # Tăng từ 45s lên 80s - đủ để bắt emails khó
   # email_retry_delay: [4, 10] (cũ) - delay riêng cho email retry (4-10s)
-  email_retry_delay: [3, 8]  # Giảm từ [4,10] xuống [3,8]
+  email_retry_delay: [2, 6]  # Giảm từ [3,8] xuống [2,6] - nhanh hơn
 
 output:
   output_dir: "data/tasks"
