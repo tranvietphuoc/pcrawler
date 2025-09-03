@@ -83,7 +83,44 @@ class EmailExtractor:
 
         for i in range(self.max_retries):
             try:
-                res = await self.crawler.arun(url=url, query=query)
+                # Thêm init_script để đóng Facebook popup nếu là Facebook URL
+                init_script = None
+                if "facebook.com" in url.lower():
+                    init_script = """
+                        // Auto-close Facebook login popup
+                        const closePopup = () => {
+                            // Tìm và click nút X của popup
+                            const closeBtn = document.querySelector('[aria-label="Close"], .x1n2onr6.x1ja2u2z, [data-testid="close-button"]');
+                            if (closeBtn) {
+                                closeBtn.click();
+                                console.log('Closed Facebook login popup');
+                            }
+                            
+                            // Hoặc tìm popup và remove
+                            const popup = document.querySelector('[role="dialog"], .x1n2onr6.x1ja2u2z');
+                            if (popup) {
+                                popup.remove();
+                                console.log('Removed Facebook popup');
+                            }
+                        };
+                        
+                        // Chạy ngay và sau 2s
+                        closePopup();
+                        setTimeout(closePopup, 2000);
+                        
+                        // Observer để đóng popup mới xuất hiện
+                        const observer = new MutationObserver(() => {
+                            closePopup();
+                        });
+                        observer.observe(document.body, { childList: true, subtree: true });
+                    """
+                
+                # Crawl với init_script nếu có
+                if init_script:
+                    res = await self.crawler.arun(url=url, query=query, init_script=init_script)
+                else:
+                    res = await self.crawler.arun(url=url, query=query)
+                    
                 content = (
                     getattr(res, "text", None)
                     or getattr(res, "content", None)
