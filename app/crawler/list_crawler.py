@@ -101,8 +101,6 @@ class ListCrawler:
         stable_count = 0
         max_stable = 5  # Tăng từ 3 lên 5 - cần ổn định hơn
         
-        logger.info(f"Starting industry loading - target: 88 industries, max attempts: {max_scroll_attempts}")
-        
         for attempt in range(max_scroll_attempts):
             try:
                 # Đếm số industries hiện tại
