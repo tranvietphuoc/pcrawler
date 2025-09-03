@@ -46,9 +46,7 @@ class EmailExtractor:
         """Simple crawl method theo document crawl4ai"""
         if not self.crawler or not url or url in ("N/A", ""):
             return None
-            
-        if not url.startswith(("http://", "https://")):
-            url = "https://" + url
+        # Không chuẩn hóa scheme theo yêu cầu: dùng URL nguyên bản
         
         # Simple timeout từ config
         timeout = self.config.processing_config.get("email_extraction_timeout", 45000) / 1000
@@ -65,17 +63,39 @@ class EmailExtractor:
                 
                 # Lấy content từ result
                 content = getattr(result, "text", None) or getattr(result, "content", None) or str(result)
+                raw = (content or "").strip()
+                # Parse trực tiếp output: cho phép nhiều delimiter ; , | \n
+                parts = [p.strip() for p in re.split(r"[;|,\n]+", raw) if p and p.strip()]
+                candidates = parts if parts else [raw] if raw else []
+
+                # Validate nâng cao: TLD >= 2, loại email pixel/tracking, giới hạn 3
+                emails = []
+                email_regex = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+                block_keywords = (
+                    'noreply@', 'no-reply@', 'donotreply@', 'do-not-reply@',
+                    '@example.com', '@test.com', '@localhost',
+                )
+                block_domain_parts = (
+                    'pixel', 'tracker', 'analytics', 'doubleclick', 'adservice', 'ads', 'utm', 'ga-'
+                )
+                for e in candidates:
+                    e = e.replace("mailto:", "").strip()
+                    if not email_regex.search(e):
+                        continue
+                    el = e.lower()
+                    # Loại rõ ràng
+                    if el.startswith(block_keywords) or any(part in el.split('@')[-1] for part in block_domain_parts):
+                        continue
+                    if e not in emails:
+                        emails.append(e)
+                    if len(emails) >= 3:
+                        break
                 
-                if content and len(content.strip()) > 100:
-                    # Extract emails từ content
-                    emails = self._extract_emails(content)
-                    if emails:
-                        print(f"[EmailExtractor] Found {len(emails)} emails from {url}")
-                        return emails
-                    else:
-                        print(f"[EmailExtractor] No emails found in content from {url}")
+                if emails:
+                    print(f"[EmailExtractor] Found {len(emails)} emails from {url}")
+                    return emails
                 else:
-                    print(f"[EmailExtractor] Content too short from {url}: {len(content or '')} chars")
+                    print(f"[EmailExtractor] No emails parsed from AI output for {url}")
                 
                 # Delay trước khi retry
                 if attempt < self.max_retries - 1:
@@ -97,13 +117,24 @@ class EmailExtractor:
         return None
 
     def _extract_emails(self, text: str) -> list:
-        """Simple email extraction với regex cơ bản"""
+        """Email extraction với xử lý obfuscation và regex linh hoạt"""
         if not text:
             return []
         
-        # Regex pattern đơn giản để tìm emails
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        emails = re.findall(email_pattern, text)
+        # Chuẩn hóa các dạng obfuscation phổ biến
+        s = text
+        s = re.sub(r"\[(at|AT)\]|\(at\)|\s+at\s+", "@", s)
+        s = re.sub(r"\[(dot|DOT)\]|\(dot\)|\s+dot\s+", ".", s)
+        s = s.replace("[.]", ".").replace("(.)", ".")
+        s = s.replace("[at]", "@").replace("(at)", "@")
+        s = s.replace("[dot]", ".").replace("(dot)", ".")
+        
+        # Bắt cả mailto:
+        s = s.replace("mailto:", "")
+        
+        # Regex pattern: chấp nhận TLD >= 1 ký tự để bắt ap@pixel.a
+        email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+\b"
+        emails = re.findall(email_pattern, s)
         
         # Loại bỏ emails không hợp lệ
         valid_emails = []
@@ -117,8 +148,9 @@ class EmailExtractor:
                 continue
             valid_emails.append(email)
         
-        # Trả về unique emails
-        return list(set(valid_emails))
+        # Trả về unique, tối đa 3 email
+        unique = list(dict.fromkeys(valid_emails))
+        return unique[:3]
 
     async def from_website(self, website: str):
         """Extract emails từ website"""
