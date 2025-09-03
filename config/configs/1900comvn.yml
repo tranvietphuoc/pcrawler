@@ -36,8 +36,8 @@ xpath:
   filter_button: "//div[contains(@class,'d-none')]//button[contains(@class,'btn-company')]"
 
 crawl4ai:
-  website_query: "Extract business emails from Contact Us/About/footer sections. The email should not start with number or uuid like, domain not like uuid or number or dash like uuid-number-dash. The email should be a valid email address. If any invalid email, return None."
-  facebook_query: "Extract business emails from Facebook About/Intro/Contact sections. The email should not start with number or uuid like, domain not like uuid or number or dash like uuid-number-dash. The email should be a valid email address. If any invalid email, return None."
+  website_query: "Return only business emails found in Contact/About/Footer. Output exactly: emails separated by semicolons (e.g., email1@x.com; email2@y.vn). No extra text."
+  facebook_query: "Return only business emails from Facebook About/Intro/Contact. Output exactly: emails separated by semicolons (e.g., email1@x.com; email2@y.vn). No extra text."
 
 processing:
   # batch_size: 30 (cũ)
@@ -67,6 +67,11 @@ processing:
   # Email extraction settings - đơn giản và hiệu quả
   email_extraction_timeout: 60000  # 60s - phù hợp mạng chậm
   email_retry_delay: [2, 6]  # Delay có jitter, cân bằng tốc độ/ổn định
+  # Adaptive email crawling
+  email_adaptive: true
+  email_adaptive_confidence_threshold: 0.75
+  email_adaptive_max_pages: 10
+  email_adaptive_top_k_links: 4
 
 output:
   output_dir: "data/tasks"
