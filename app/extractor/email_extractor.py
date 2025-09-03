@@ -196,11 +196,19 @@ class EmailExtractor:
     async def from_website(self, website: str):
         """Extract emails từ website"""
         query = self.config.get_crawl4ai_query("website")
+        if self.use_adaptive:
+            res = await self._crawl_adaptive(website, query)
+            if res:
+                return res
         return await self._crawl(website, query)
 
     async def from_facebook(self, fb: str):
         """Extract emails từ Facebook"""
         query = self.config.get_crawl4ai_query("facebook")
+        if self.use_adaptive:
+            res = await self._crawl_adaptive(fb, query)
+            if res:
+                return res
         return await self._crawl(fb, query)
 
     def cleanup(self):

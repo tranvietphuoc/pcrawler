@@ -68,7 +68,7 @@ processing:
   email_extraction_timeout: 60000  # 60s - phù hợp mạng chậm
   email_retry_delay: [2, 6]  # Delay có jitter, cân bằng tốc độ/ổn định
   # Adaptive email crawling
-  email_adaptive: true
+  email_adaptive: True
   email_adaptive_confidence_threshold: 0.75
   email_adaptive_max_pages: 10
   email_adaptive_top_k_links: 4
