@@ -26,7 +26,7 @@ class DetailCrawler:
                 
                 # Wait for JavaScript to render dynamic content
                 js_wait = self.config.processing_config.get("js_load_wait", 3000)
-                print(f"[JS] Waiting {js_wait}ms for JavaScript to render...")
+                # print(f"[JS] Waiting {js_wait}ms for JavaScript to render...")
                 await asyncio.sleep(js_wait / 1000)
 
                 def clean(x):
