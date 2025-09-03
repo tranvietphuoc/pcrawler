@@ -99,7 +99,7 @@ class EmailExtractor:
             except Exception as e:
                 print(f"[EmailExtractor] Crawl attempt {i+1} failed for {url}: {e}")
                 if i < self.max_retries - 1:
-                    await asyncio.sleep(random.uniform(2, 4))
+                    await asyncio.sleep(random.uniform(3, 6))
                     
         return None
 
