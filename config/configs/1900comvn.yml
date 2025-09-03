@@ -40,22 +40,34 @@ crawl4ai:
   facebook_query: "Extract business emails from Facebook About/Intro/Contact sections. The email should not start with number or uuid like, domain not like uuid or number or dash like uuid-number-dash. The email should be a valid email address. If any invalid email, return None."
 
 processing:
-  batch_size: 30
-  write_batch_size: 150
-  max_concurrent_pages: 5
-  max_retries: 3
-  delay_range: [2, 6]
-  batch_delay: [6, 12]
-  session_delay: [12, 25]
-  timeout: 60000  # Giảm từ 90000 xuống 60000 (60s) - ổn định hơn
-  network_timeout: 45000  # Tăng từ 30000 lên 45000 (45s) - đủ thời gian load
-  page_load_wait: 2000
-  js_load_wait: 3000
+  # batch_size: 30 (cũ)
+  batch_size: 50  # Tăng từ 30 lên 50 - tận dụng CPU mạnh
+  # write_batch_size: 150 (cũ)
+  write_batch_size: 200  # Tăng từ 150 lên 200
+  # max_concurrent_pages: 5 (cũ)
+  max_concurrent_pages: 8  # Tăng từ 5 lên 8 - phù hợp 50% CPU
+  max_retries: 5  # Giữ nguyên
+  # delay_range: [3, 8] (cũ) - tăng từ [2,6] lên [3,8] - đợi lâu hơn
+  delay_range: [2, 5]  # Giảm từ [3,8] xuống [2,5] - CPU mạnh xử lý nhanh
+  # batch_delay: [6, 12] (cũ)
+  batch_delay: [4, 8]  # Giảm từ [6,12] xuống [4,8]
+  # session_delay: [12, 25] (cũ)
+  session_delay: [8, 15]  # Giảm từ [12,25] xuống [8,15]
+  timeout: 90000  # Giữ nguyên
+  network_timeout: 60000  # Giữ nguyên
+  # page_load_wait: 2000 (cũ)
+  page_load_wait: 1500  # Giảm từ 2000 xuống 1500
+  # js_load_wait: 3000 (cũ)
+  js_load_wait: 2000  # Giảm từ 3000 xuống 2000
   stealth_mode: true
   # Industry loading settings - đơn giản
-  industry_load_timeout: 60000  # Tăng timeout cho việc load industries (60s)
-  industry_scroll_timeout: 90000  # Tăng timeout cho việc scroll (90s)
-  industry_retry_delay: 3  # Giảm delay giữa các lần retry (3s)
+  industry_load_timeout: 60000  # Giữ nguyên
+  industry_scroll_timeout: 90000  # Giữ nguyên
+  industry_retry_delay: 3  # Giữ nguyên
+  # Email extraction settings
+  email_extraction_timeout: 45000  # Giữ nguyên
+  # email_retry_delay: [4, 10] (cũ) - delay riêng cho email retry (4-10s)
+  email_retry_delay: [3, 8]  # Giảm từ [4,10] xuống [3,8]
 
 output:
   output_dir: "data/tasks"
