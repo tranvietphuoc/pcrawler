@@ -2,7 +2,6 @@ import asyncio
 import random
 import re
 import os
-import time
 from config import CrawlerConfig
 
 try:
@@ -29,9 +28,6 @@ class EmailExtractor:
         self.config = config or CrawlerConfig()
         self.max_retries = max_retries or self.config.processing_config["max_retries"]
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
-        
-        # Email extraction timeout từ config
-        self.email_timeout = self.config.processing_config.get("email_extraction_timeout", 60000) / 1000  # Convert ms to seconds
 
         # Set unique database path per worker để tránh lock
         worker_id = os.environ.get('CELERY_WORKER_ID', 'default')
@@ -87,14 +83,7 @@ class EmailExtractor:
 
         for i in range(self.max_retries):
             try:
-                print(f"[EmailExtractor] Crawling {url} (attempt {i+1}/{self.max_retries})")
-                
-                # Sử dụng timeout từ config
-                res = await asyncio.wait_for(
-                    self.crawler.arun(url=url, query=query),
-                    timeout=self.email_timeout
-                )
-                
+                res = await self.crawler.arun(url=url, query=query)
                 content = (
                     getattr(res, "text", None)
                     or getattr(res, "content", None)
@@ -105,47 +94,24 @@ class EmailExtractor:
                 if emails:
                     return emails
                     
-                # Delay trước khi retry
-                if i < self.max_retries - 1:
-                    delay = random.uniform(*self.delay_range)
-                    await asyncio.sleep(delay)
-                    
-            except asyncio.TimeoutError:
-                if i < self.max_retries - 1:
-                    delay = random.uniform(2, 4)
-                    await asyncio.sleep(delay)
+                await asyncio.sleep(random.uniform(*self.delay_range))
+                
             except Exception as e:
+                print(f"[EmailExtractor] Crawl attempt {i+1} failed for {url}: {e}")
                 if i < self.max_retries - 1:
-                    delay = random.uniform(2, 4)
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(random.uniform(2, 4))
                     
         return None
 
     async def from_website(self, website: str):
-        """Extract emails từ website với timing measurement"""
-        if not website or website == "N/A":
-            return None
-            
-        start_time = time.time()
+        """Extract emails từ website"""
         query = self.config.get_crawl4ai_query("website")
-        result = await self._crawl(website, query)
-        
-        total_time = time.time() - start_time
-        print(f"[EmailExtractor] Website {website} processed in {total_time:.2f}s")
-        return result
+        return await self._crawl(website, query)
 
     async def from_facebook(self, fb: str):
-        """Extract emails từ Facebook với timing measurement"""
-        if not fb or fb == "N/A":
-            return None
-            
-        start_time = time.time()
+        """Extract emails từ Facebook"""
         query = self.config.get_crawl4ai_query("facebook")
-        result = await self._crawl(fb, query)
-        
-        total_time = time.time() - start_time
-        print(f"[EmailExtractor] Facebook {fb} processed in {total_time:.2f}s")
-        return result
+        return await self._crawl(fb, query)
 
     def cleanup(self):
         """Cleanup resources - sync version"""
