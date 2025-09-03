@@ -65,8 +65,8 @@ processing:
   industry_scroll_timeout: 90000  # Giữ nguyên
   industry_retry_delay: 3  # Giữ nguyên
   # Email extraction settings - đơn giản và hiệu quả
-  email_extraction_timeout: 30000  # Giảm xuống 30s - đủ để crawl
-  email_retry_delay: [1, 3]  # Giảm delay - nhanh hơn
+  email_extraction_timeout: 60000  # 60s - phù hợp mạng chậm
+  email_retry_delay: [2, 6]  # Delay có jitter, cân bằng tốc độ/ổn định
 
 output:
   output_dir: "data/tasks"
