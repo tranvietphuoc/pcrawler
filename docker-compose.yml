@@ -43,14 +43,13 @@ services:
       - CELERY_WORKER_PREFETCH_MULTIPLIER=2 # Tăng từ 1 lên 2
     volumes: ["./data:/app/data"]
     command: >
-      # celery -A app.tasks.celery_app worker --loglevel=INFO -Q crawl -c 4 --prefetch-multiplier=1 --without-heartbeat --max-memory-per-child=2000000 (cũ)
-      celery -A app.tasks.celery_app worker 
-      --loglevel=INFO 
-      -Q crawl 
-      -c 10  # Tăng từ 4 lên 10 concurrency (50% CPU)
-      --prefetch-multiplier=2  # Tăng từ 1 lên 2
-      --without-heartbeat 
-      --max-memory-per-child=4000000  # 4GB per child
+      celery -A app.tasks.celery_app worker
+      --loglevel=INFO
+      -Q crawl
+      -c 10
+      --prefetch-multiplier=2
+      --without-heartbeat
+      --max-memory-per-child=4000000
 
   app:
     build: .
