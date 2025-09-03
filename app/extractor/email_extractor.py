@@ -105,10 +105,36 @@ class EmailExtractor:
             try:
                 # Close crawler if it has close method
                 if hasattr(self.crawler, 'close'):
-                    self.crawler.close()
+                    # AsyncWebCrawler.close() là coroutine, cần await
+                    # Nhưng method này không async, nên dùng asyncio.create_task
+                    try:
+                        import asyncio
+                        # Tạo task để chạy close() trong background
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # Nếu loop đang chạy, tạo task
+                            asyncio.create_task(self.crawler.close())
+                        else:
+                            # Nếu loop không chạy, chạy trực tiếp
+                            loop.run_until_complete(self.crawler.close())
+                    except Exception as e:
+                        print(f"[EmailExtractor] Async close failed: {e}")
+                        # Fallback: xóa reference
+                        del self.crawler
                 elif hasattr(self.crawler, '__del__'):
                     del self.crawler
             except Exception as e:
                 print(f"[EmailExtractor] Cleanup error: {e}")
+            finally:
+                self.crawler = None
+
+    async def async_cleanup(self):
+        """Async cleanup method - sử dụng khi có thể await"""
+        if hasattr(self, 'crawler') and self.crawler:
+            try:
+                if hasattr(self.crawler, 'close'):
+                    await self.crawler.close()
+            except Exception as e:
+                print(f"[EmailExtractor] Async cleanup error: {e}")
             finally:
                 self.crawler = None

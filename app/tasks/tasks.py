@@ -214,7 +214,11 @@ def crawl_details_extract_write(
         # Cleanup EmailExtractor
         if extractor:
             try:
-                extractor.cleanup()
+                # Sử dụng async cleanup nếu có thể
+                if hasattr(extractor, 'async_cleanup'):
+                    await extractor.async_cleanup()
+                else:
+                    extractor.cleanup()
             except Exception as e:
                 print(f"[WARNING] EmailExtractor cleanup failed: {e}")
                 
