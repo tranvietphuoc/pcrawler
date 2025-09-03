@@ -7,12 +7,7 @@ try:
 except Exception:
     AsyncWebCrawler = None
 
-# Thử import AdaptiveCrawler
-try:
-    from crawl4ai import AdaptiveCrawler, AdaptiveConfig
-except Exception:
-    AdaptiveCrawler = None
-    AdaptiveConfig = None
+
 
 # Global instance per worker process
 _worker_extractor = None
@@ -33,14 +28,7 @@ class EmailExtractor:
         self.max_retries = max_retries or self.config.processing_config["max_retries"]
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
         
-        # Adaptive flags
-        pcfg = self.config.processing_config
-        self.use_adaptive = bool(pcfg.get("email_adaptive", False))
-        self.adaptive_conf = {
-            "confidence_threshold": float(pcfg.get("email_adaptive_confidence_threshold", 0.75)),
-            "max_pages": int(pcfg.get("email_adaptive_max_pages", 10)),
-            "top_k_links": int(pcfg.get("email_adaptive_top_k_links", 4)),
-        }
+
         
         # Set unique database path per worker để tránh lock
         worker_id = os.environ.get('CELERY_WORKER_ID', 'default')
@@ -58,106 +46,7 @@ class EmailExtractor:
             
         self._initialized = True
 
-    async def _crawl_adaptive(self, url: str, query: str):
-        if not self.crawler or not AdaptiveCrawler or not AdaptiveConfig:
-            return None
-        try:
-            cfg = AdaptiveConfig(
-                strategy="statistical",
-                confidence_threshold=self.adaptive_conf["confidence_threshold"],
-                max_pages=self.adaptive_conf["max_pages"],
-                top_k_links=self.adaptive_conf["top_k_links"],
-            )
-            adaptive = AdaptiveCrawler(self.crawler, cfg)
-            await adaptive.digest(start_url=url, query=query)
-            docs = adaptive.get_relevant_content(top_k=5)
-            text = "\n".join(d.get("content", "") for d in docs if d.get("content"))
-            emails = self._extract_emails(text)
-            if emails:
-                print(f"[EmailExtractor] (Adaptive) Found {len(emails)} emails from {url}")
-                return emails[:3]
-        except Exception as e:
-            print(f"[EmailExtractor] Adaptive mode failed for {url}: {e}")
-        return None
 
-    async def _crawl(self, url: str, query: str):
-        """Simple crawl method theo document crawl4ai"""
-        if not self.crawler or not url or url in ("N/A", ""):
-            return None
-        # Không chuẩn hóa scheme theo yêu cầu: dùng URL nguyên bản
-        
-        # Nếu bật adaptive thì thử trước
-        if self.use_adaptive:
-            result = await self._crawl_adaptive(url, query)
-            if result:
-                return result
-        
-        # Simple timeout từ config
-        timeout = self.config.processing_config.get("email_extraction_timeout", 45000) / 1000
-        
-        for attempt in range(self.max_retries):
-            try:
-                print(f"[EmailExtractor] Crawling {url} (attempt {attempt + 1}/{self.max_retries})")
-                
-                # Sử dụng crawl4ai theo document
-                result = await asyncio.wait_for(
-                    self.crawler.arun(url=url, query=query),
-                    timeout=timeout
-                )
-                
-                # Lấy content từ result
-                content = getattr(result, "text", None) or getattr(result, "content", None) or str(result)
-                raw = (content or "").strip()
-                # Parse trực tiếp output: cho phép nhiều delimiter ; , | \n
-                parts = [p.strip() for p in re.split(r"[;|,\n]+", raw) if p and p.strip()]
-                candidates = parts if parts else [raw] if raw else []
-
-                # Validate nâng cao: TLD >= 2, loại email pixel/tracking, giới hạn 3
-                emails = []
-                email_regex = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-                block_keywords = (
-                    'noreply@', 'no-reply@', 'donotreply@', 'do-not-reply@',
-                    '@example.com', '@test.com', '@localhost',
-                )
-                block_domain_parts = (
-                    'pixel', 'tracker', 'analytics', 'doubleclick', 'adservice', 'ads', 'utm', 'ga-'
-                )
-                for e in candidates:
-                    e = e.replace("mailto:", "").strip()
-                    if not email_regex.search(e):
-                        continue
-                    el = e.lower()
-                    if el.startswith(block_keywords) or any(part in el.split('@')[-1] for part in block_domain_parts):
-                        continue
-                    if e not in emails:
-                        emails.append(e)
-                    if len(emails) >= 3:
-                        break
-                
-                if emails:
-                    print(f"[EmailExtractor] Found {len(emails)} emails from {url}")
-                    return emails
-                else:
-                    print(f"[EmailExtractor] No emails parsed from AI output for {url}")
-                
-                # Delay trước khi retry
-                if attempt < self.max_retries - 1:
-                    delay = random.uniform(2, 6)
-                    print(f"[EmailExtractor] Retrying in {delay:.1f}s...")
-                    await asyncio.sleep(delay)
-                    
-            except asyncio.TimeoutError:
-                print(f"[EmailExtractor] Timeout for {url}")
-            except Exception as e:
-                print(f"[EmailExtractor] Error crawling {url}: {e}")
-                
-                # Delay trước khi retry
-                if attempt < self.max_retries - 1:
-                    delay = random.uniform(2, 6)
-                    await asyncio.sleep(delay)
-        
-        print(f"[EmailExtractor] Failed to extract emails from {url}")
-        return None
 
     def _extract_emails(self, text: str) -> list:
         """Email extraction với xử lý obfuscation và regex linh hoạt"""
@@ -194,22 +83,102 @@ class EmailExtractor:
         return out
 
     async def from_website(self, website: str):
-        """Extract emails từ website"""
+        """Extract emails từ website thông thường"""
+        if not website or website == "N/A":
+            return None
+            
         query = self.config.get_crawl4ai_query("website")
-        if self.use_adaptive:
-            res = await self._crawl_adaptive(website, query)
-            if res:
-                return res
-        return await self._crawl(website, query)
+        
+        try:
+            if not self.crawler:
+                return None
+                
+            context = await self.crawler.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080}
+            )
+            
+            result = await asyncio.wait_for(
+                context.arun(url=website, query=query),
+                timeout=45
+            )
+            
+            content = getattr(result, "text", None) or getattr(result, "content", None) or str(result)
+            emails = self._extract_emails(content)
+            
+            await context.close()
+            return emails[:3] if emails else None
+            
+        except Exception as e:
+            print(f"[EmailExtractor] Website crawl failed: {e}")
+            if 'context' in locals():
+                await context.close()
+            return None
 
     async def from_facebook(self, fb: str):
-        """Extract emails từ Facebook"""
+        """Extract emails từ Facebook với auto-close popup login"""
+        if not fb or fb == "N/A":
+            return None
+            
+        if not self.crawler:
+            return None
+            
         query = self.config.get_crawl4ai_query("facebook")
-        if self.use_adaptive:
-            res = await self._crawl_adaptive(fb, query)
-            if res:
-                return res
-        return await self._crawl(fb, query)
+        
+        try:
+            # Tạo context với stealth
+            context = await self.crawler.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080}
+            )
+            
+            # Script để tự động đóng popup login
+            await context.add_init_script("""
+                // Auto-close Facebook login popup
+                const closePopup = () => {
+                    // Tìm và click nút X của popup
+                    const closeBtn = document.querySelector('[aria-label="Close"], .x1n2onr6.x1ja2u2z, [data-testid="close-button"]');
+                    if (closeBtn) {
+                        closeBtn.click();
+                        console.log('Closed Facebook login popup');
+                    }
+                    
+                    // Hoặc tìm popup và remove
+                    const popup = document.querySelector('[role="dialog"], .x1n2onr6.x1ja2u2z');
+                    if (popup) {
+                        popup.remove();
+                        console.log('Removed Facebook popup');
+                    }
+                };
+                
+                // Chạy ngay và sau 2s
+                closePopup();
+                setTimeout(closePopup, 2000);
+                
+                // Observer để đóng popup mới xuất hiện
+                const observer = new MutationObserver(() => {
+                    closePopup();
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            """)
+            
+            # Crawl với context đã setup
+            result = await asyncio.wait_for(
+                context.arun(url=fb, query=query),
+                timeout=45
+            )
+            
+            content = getattr(result, "text", None) or getattr(result, "content", None) or str(result)
+            emails = self._extract_emails(content)
+            
+            await context.close()
+            return emails[:3] if emails else None
+            
+        except Exception as e:
+            print(f"[EmailExtractor] Facebook crawl failed: {e}")
+            if 'context' in locals():
+                await context.close()
+            return None
 
     def cleanup(self):
         """Cleanup resources"""
