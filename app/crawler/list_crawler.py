@@ -93,15 +93,15 @@ class ListCrawler:
         return False
 
     async def _scroll_and_load_industries(self, page, max_scroll_attempts: int = None) -> int:
-        """Scroll và load industries với logic adaptive"""
-        if max_scroll_attempts is None:
-            # Tính toán số lần scroll dựa trên timeout
-            scroll_timeout = self.config.processing_config.get("industry_scroll_timeout", 60000)
-            max_scroll_attempts = scroll_timeout // 1000  # 1 giây mỗi lần scroll
+        """Scroll và load industries - đơn giản, đảm bảo load đủ 88"""
+        # Tăng số lần scroll để đảm bảo load đủ
+        max_scroll_attempts = 150  # Tăng từ 80 lên 150
         
         prev_count = 0
         stable_count = 0
-        max_stable = 3  # Cần 3 lần count giống nhau để xác định đã load xong
+        max_stable = 5  # Tăng từ 3 lên 5 - cần ổn định hơn
+        
+        logger.info(f"Starting industry loading - target: 88 industries, max attempts: {max_scroll_attempts}")
         
         for attempt in range(max_scroll_attempts):
             try:
@@ -124,14 +124,8 @@ class ListCrawler:
                     "ul.select2-results__options",
                 )
                 
-                # Đợi load thêm
-                await asyncio.sleep(0.5)
-                
-                # Kiểm tra xem có loading indicator không
-                loading_count = await page.locator("//li[contains(@class,'select2-results__option') and contains(@class,'loading')]").count()
-                if loading_count == 0 and current_count > 0:
-                    # Không còn loading, có thể đã load xong
-                    stable_count += 1
+                # Tăng delay để đảm bảo load đủ
+                await asyncio.sleep(1.0)  # Tăng từ 0.25s lên 1.0s
                 
             except Exception as e:
                 logger.warning(f"Scroll attempt {attempt + 1} failed: {e}")

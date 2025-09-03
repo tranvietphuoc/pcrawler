@@ -52,10 +52,10 @@ processing:
   page_load_wait: 2000
   js_load_wait: 3000
   stealth_mode: true
-  # Industry loading settings
-  industry_load_timeout: 45000  # Timeout cho việc load industries
-  industry_scroll_timeout: 60000  # Timeout cho việc scroll load industries
-  industry_retry_delay: 5  # Delay giữa các lần retry (giây)
+  # Industry loading settings - đơn giản
+  industry_load_timeout: 60000  # Tăng timeout cho việc load industries (60s)
+  industry_scroll_timeout: 90000  # Tăng timeout cho việc scroll (90s)
+  industry_retry_delay: 3  # Giảm delay giữa các lần retry (3s)
 
 output:
   output_dir: "data/tasks"
