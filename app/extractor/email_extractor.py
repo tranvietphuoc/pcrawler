@@ -87,32 +87,24 @@ class EmailExtractor:
         if not website or website == "N/A":
             return None
             
+        if not self.crawler:
+            return None
+            
         query = self.config.get_crawl4ai_query("website")
         
         try:
-            if not self.crawler:
-                return None
-                
-            context = await self.crawler.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080}
-            )
-            
             result = await asyncio.wait_for(
-                context.arun(url=website, query=query),
+                self.crawler.arun(url=website, query=query),
                 timeout=45
             )
             
             content = getattr(result, "text", None) or getattr(result, "content", None) or str(result)
             emails = self._extract_emails(content)
             
-            await context.close()
             return emails[:3] if emails else None
             
         except Exception as e:
             print(f"[EmailExtractor] Website crawl failed: {e}")
-            if 'context' in locals():
-                await context.close()
             return None
 
     async def from_facebook(self, fb: str):
@@ -126,58 +118,50 @@ class EmailExtractor:
         query = self.config.get_crawl4ai_query("facebook")
         
         try:
-            # Tạo context với stealth
-            context = await self.crawler.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080}
-            )
-            
-            # Script để tự động đóng popup login
-            await context.add_init_script("""
-                // Auto-close Facebook login popup
-                const closePopup = () => {
-                    // Tìm và click nút X của popup
-                    const closeBtn = document.querySelector('[aria-label="Close"], .x1n2onr6.x1ja2u2z, [data-testid="close-button"]');
-                    if (closeBtn) {
-                        closeBtn.click();
-                        console.log('Closed Facebook login popup');
-                    }
-                    
-                    // Hoặc tìm popup và remove
-                    const popup = document.querySelector('[role="dialog"], .x1n2onr6.x1ja2u2z');
-                    if (popup) {
-                        popup.remove();
-                        console.log('Removed Facebook popup');
-                    }
-                };
-                
-                // Chạy ngay và sau 2s
-                closePopup();
-                setTimeout(closePopup, 2000);
-                
-                // Observer để đóng popup mới xuất hiện
-                const observer = new MutationObserver(() => {
-                    closePopup();
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
-            """)
-            
-            # Crawl với context đã setup
+            # Sử dụng crawl4ai.arun trực tiếp với init_script
             result = await asyncio.wait_for(
-                context.arun(url=fb, query=query),
+                self.crawler.arun(
+                    url=fb, 
+                    query=query,
+                    init_script="""
+                        // Auto-close Facebook login popup
+                        const closePopup = () => {
+                            // Tìm và click nút X của popup
+                            const closeBtn = document.querySelector('[aria-label="Close"], .x1n2onr6.x1ja2u2z, [data-testid="close-button"]');
+                            if (closeBtn) {
+                                closeBtn.click();
+                                console.log('Closed Facebook login popup');
+                            }
+                            
+                            // Hoặc tìm popup và remove
+                            const popup = document.querySelector('[role="dialog"], .x1n2onr6.x1ja2u2z');
+                            if (popup) {
+                                popup.remove();
+                                console.log('Removed Facebook popup');
+                            }
+                        };
+                        
+                        // Chạy ngay và sau 2s
+                        closePopup();
+                        setTimeout(closePopup, 2000);
+                        
+                        // Observer để đóng popup mới xuất hiện
+                        const observer = new MutationObserver(() => {
+                            closePopup();
+                        });
+                        observer.observe(document.body, { childList: true, subtree: true });
+                    """
+                ),
                 timeout=45
             )
             
             content = getattr(result, "text", None) or getattr(result, "content", None) or str(result)
             emails = self._extract_emails(content)
             
-            await context.close()
             return emails[:3] if emails else None
             
         except Exception as e:
             print(f"[EmailExtractor] Facebook crawl failed: {e}")
-            if 'context' in locals():
-                await context.close()
             return None
 
     def cleanup(self):
