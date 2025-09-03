@@ -142,8 +142,27 @@ def crawl_details_extract_write(
     
     async def _run():
         detail = DetailCrawler(config=config, max_concurrent_pages=max_concurrent_pages)
-        extractor = EmailExtractor(config=config)
-        rows = await detail.crawl_company_batch(links)
+        
+        # Tạo EmailExtractor với error handling
+        extractor = None
+        try:
+            extractor = EmailExtractor(config=config)
+        except Exception as e:
+            print(f"[ERROR] Failed to create EmailExtractor: {e}")
+            # Fallback: crawl without email extraction
+            extractor = None
+        
+        try:
+            rows = await detail.crawl_company_batch(links)
+        except Exception as e:
+            print(f"[ERROR] Failed to crawl company batch: {e}")
+            return {
+                "task_id": task_id,
+                "file_path": task_file,
+                "rows_processed": 0,
+                "status": "error",
+                "error": str(e)
+            }
 
         pending = []
         for d in rows:
@@ -153,21 +172,29 @@ def crawl_details_extract_write(
             # Clean phone number
             d["phone"] = clean_phone_number(d.get("phone", "N/A"))
 
-            # Extract email (prioritize FB)
+            # Extract email (prioritize FB) - với error handling
             emails = None
             email_src = "N/A"
-            if d.get("facebook") and d["facebook"] != "N/A":
-                e1 = await extractor.from_facebook(d["facebook"])
-                if e1:
-                    emails, email_src = e1, "Facebook"
-            if (
-                not emails
-                and d.get("website")
-                and d["website"] != "N/A"
-            ):
-                e2 = await extractor.from_website(d["website"])
-                if e2:
-                    emails, email_src = e2, "Website"
+            
+            if extractor:  # Chỉ extract email nếu extractor hoạt động
+                try:
+                    if d.get("facebook") and d["facebook"] != "N/A":
+                        e1 = await extractor.from_facebook(d["facebook"])
+                        if e1:
+                            emails, email_src = e1, "Facebook"
+                    if (
+                        not emails
+                        and d.get("website")
+                        and d["website"] != "N/A"
+                    ):
+                        e2 = await extractor.from_website(d["website"])
+                        if e2:
+                            emails, email_src = e2, "Website"
+                except Exception as e:
+                    print(f"[WARNING] Email extraction failed for {d.get('name', 'Unknown')}: {e}")
+                    # Continue without email extraction
+                    emails = None
+                    email_src = "N/A"
 
             d["extracted_emails"] = "; ".join(emails) if emails else "N/A"
             d["email_source"] = email_src
@@ -183,6 +210,14 @@ def crawl_details_extract_write(
             # Expand emails before writing
             expanded_pending = expand_emails(pending)
             safe_append_rows_csv(task_file, expanded_pending, config.get_fieldnames())
+            
+        # Cleanup EmailExtractor
+        if extractor:
+            try:
+                extractor.cleanup()
+            except Exception as e:
+                print(f"[WARNING] EmailExtractor cleanup failed: {e}")
+                
         # Memory cleanup
         gc.collect()
         mem_after = process.memory_info().rss // (1024 * 1024)
