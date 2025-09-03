@@ -47,11 +47,15 @@ processing:
   delay_range: [2, 6]
   batch_delay: [6, 12]
   session_delay: [12, 25]
-  timeout: 90000
-  network_timeout: 30000
+  timeout: 60000  # Giảm từ 90000 xuống 60000 (60s) - ổn định hơn
+  network_timeout: 45000  # Tăng từ 30000 lên 45000 (45s) - đủ thời gian load
   page_load_wait: 2000
   js_load_wait: 3000
   stealth_mode: true
+  # Industry loading settings
+  industry_load_timeout: 45000  # Timeout cho việc load industries
+  industry_scroll_timeout: 60000  # Timeout cho việc scroll load industries
+  industry_retry_delay: 5  # Delay giữa các lần retry (giây)
 
 output:
   output_dir: "data/tasks"

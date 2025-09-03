@@ -61,66 +61,182 @@ class ListCrawler:
         except Exception:
             return 1
 
-    async def get_industries(self, base_url: str) -> List[Tuple[str, str]]:
-        p, browser, context, page = await self._open_context()
-        try:
-            await page.goto(base_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")
-            await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+    async def _wait_for_select2_ready(self, page, max_wait: int = None) -> bool:
+        """Đợi Select2 dropdown sẵn sàng với timeout adaptive"""
+        if max_wait is None:
+            max_wait = self.config.processing_config.get("industry_load_timeout", 45000) // 1000
+        
+        start_time = asyncio.get_event_loop().time()
+        
+        while (asyncio.get_event_loop().time() - start_time) < max_wait:
+            try:
+                # Kiểm tra xem select2 có visible không
+                select2_selection = page.locator(self.config.get_xpath("industry_select"))
+                if await select2_selection.count() == 0:
+                    select2_selection = page.locator(self.config.get_xpath("industry_select_fallback"))
+                
+                if await select2_selection.count() > 0:
+                    # Thử click để mở dropdown
+                    await select2_selection.first.dispatch_event("mousedown")
+                    await asyncio.sleep(1)
+                    
+                    # Kiểm tra xem dropdown có mở không
+                    results_panel = page.locator(self.config.get_xpath("industry_results"))
+                    if await results_panel.count() > 0:
+                        return True
+                
+                await asyncio.sleep(2)
+            except Exception:
+                await asyncio.sleep(2)
+                continue
+        
+        return False
 
-            # 1) Select2 của trường "Ngành"
-            select2_selection = page.locator(self.config.get_xpath("industry_select"))
-            if await select2_selection.count() == 0:
-                select2_selection = page.locator(self.config.get_xpath("industry_select_fallback"))
-
-            # 2) Mở dropdown bằng 'mousedown'
-            await select2_selection.first.dispatch_event("mousedown")
-
-            # 3) Panel + ô search
-            results_panel = page.locator(self.config.get_xpath("industry_results"))
-            await results_panel.wait_for(state="visible", timeout=30000)
-
-            search_input = page.locator(self.config.get_xpath("industry_search"))
-            if await search_input.count():
-                await search_input.first.fill(" ")
-                await asyncio.sleep(0.4)
-
-            # 4) Scroll load hết option
-            prev = -1
-            for _ in range(80):
-                count = await page.locator(self.config.get_xpath("industry_options")).count()
-                if count == prev:
-                    break
-                prev = count
+    async def _scroll_and_load_industries(self, page, max_scroll_attempts: int = None) -> int:
+        """Scroll và load industries với logic adaptive"""
+        if max_scroll_attempts is None:
+            # Tính toán số lần scroll dựa trên timeout
+            scroll_timeout = self.config.processing_config.get("industry_scroll_timeout", 60000)
+            max_scroll_attempts = scroll_timeout // 1000  # 1 giây mỗi lần scroll
+        
+        prev_count = 0
+        stable_count = 0
+        max_stable = 3  # Cần 3 lần count giống nhau để xác định đã load xong
+        
+        for attempt in range(max_scroll_attempts):
+            try:
+                # Đếm số industries hiện tại
+                current_count = await page.locator(self.config.get_xpath("industry_options")).count()
+                
+                if current_count == prev_count:
+                    stable_count += 1
+                    if stable_count >= max_stable:
+                        logger.info(f"Industries loaded successfully after {attempt + 1} scroll attempts. Total: {current_count}")
+                        return current_count
+                else:
+                    stable_count = 0
+                
+                prev_count = current_count
+                
+                # Scroll xuống cuối
                 await page.evaluate(
                     "(sel)=>{const el=document.querySelector(sel); if(el){el.scrollTop=el.scrollHeight;}}",
                     "ul.select2-results__options",
                 )
-                await asyncio.sleep(0.25)
+                
+                # Đợi load thêm
+                await asyncio.sleep(0.5)
+                
+                # Kiểm tra xem có loading indicator không
+                loading_count = await page.locator("//li[contains(@class,'select2-results__option') and contains(@class,'loading')]").count()
+                if loading_count == 0 and current_count > 0:
+                    # Không còn loading, có thể đã load xong
+                    stable_count += 1
+                
+            except Exception as e:
+                logger.warning(f"Scroll attempt {attempt + 1} failed: {e}")
+                await asyncio.sleep(1)
+                continue
+        
+        # Fallback: trả về số lượng hiện tại
+        final_count = await page.locator(self.config.get_xpath("industry_options")).count()
+        logger.warning(f"Scroll timeout reached. Final count: {final_count}")
+        return final_count
 
-            # 5) Thu thập (value, text)
-            nodes = await page.locator(self.config.get_xpath("industry_options")).all()
-
-            out: List[Tuple[str, str]] = []
-            for n in nodes:
-                text = (await n.text_content() or "").strip()
-                if not text or text.lower() == "no results found":
-                    continue
-                node_id = await n.get_attribute("id")
-                val = (
-                    node_id.split("-")[-1]
-                    if (node_id and "-" in node_id)
-                    else (await n.get_attribute("data-id")) or text
-                )
-                out.append((val, text))
-
-            logger.info(f"Found {len(out)} industries")
-            return out
-
-        finally:
-            await page.close()
-            await context.close()
-            await browser.close()
-            await p.stop()
+    async def get_industries(self, base_url: str) -> List[Tuple[str, str]]:
+        """Lấy danh sách industries với retry mechanism và timeout ổn định"""
+        max_retries = self.config.processing_config.get("max_retries", 3)
+        retry_delay = self.config.processing_config.get("industry_retry_delay", 5)
+        
+        logger.info(f"Starting industry extraction from: {base_url}")
+        logger.info(f"Configuration: max_retries={max_retries}, retry_delay={retry_delay}s")
+        
+        for retry in range(max_retries):
+            try:
+                logger.info(f"Attempting to get industries (attempt {retry + 1}/{max_retries})")
+                
+                p, browser, context, page = await self._open_context()
+                
+                try:
+                    # 1. Load trang với timeout ổn định
+                    timeout = self.config.processing_config.get("timeout", 60000)
+                    network_timeout = self.config.processing_config.get("network_timeout", 45000)
+                    
+                    logger.info(f"Loading page with timeout={timeout}ms, network_timeout={network_timeout}ms")
+                    await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
+                    logger.info("Page loaded, waiting for network idle...")
+                    await page.wait_for_load_state("networkidle", timeout=network_timeout)
+                    logger.info("Network idle achieved")
+                    
+                    # 2. Đợi Select2 sẵn sàng
+                    logger.info("Waiting for Select2 to be ready...")
+                    if not await self._wait_for_select2_ready(page):
+                        raise Exception("Select2 dropdown not ready after timeout")
+                    logger.info("Select2 dropdown is ready")
+                    
+                    # 3. Scroll và load industries
+                    logger.info("Scrolling to load all industries...")
+                    total_industries = await self._scroll_and_load_industries(page)
+                    
+                    if total_industries == 0:
+                        raise Exception("No industries found after scrolling")
+                    
+                    logger.info(f"Scrolling completed. Found {total_industries} industry options")
+                    
+                    # 4. Thu thập industries
+                    logger.info("Extracting industry data...")
+                    nodes = await page.locator(self.config.get_xpath("industry_options")).all()
+                    logger.info(f"Processing {len(nodes)} industry nodes")
+                    
+                    out: List[Tuple[str, str]] = []
+                    skipped_count = 0
+                    
+                    for i, n in enumerate(nodes):
+                        try:
+                            text = (await n.text_content() or "").strip()
+                            if not text or text.lower() in ["no results found", "loading...", ""]:
+                                skipped_count += 1
+                                continue
+                            
+                            node_id = await n.get_attribute("id")
+                            val = (
+                                node_id.split("-")[-1]
+                                if (node_id and "-" in node_id)
+                                else (await n.get_attribute("data-id")) or text
+                            )
+                            out.append((val, text))
+                            
+                            if (i + 1) % 10 == 0:  # Log progress mỗi 10 items
+                                logger.info(f"Processed {i + 1}/{len(nodes)} industries...")
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to process industry node {i}: {e}")
+                            skipped_count += 1
+                            continue
+                    
+                    if len(out) == 0:
+                        raise Exception("No valid industries extracted")
+                    
+                    logger.info(f"Industry extraction completed: {len(out)} valid, {skipped_count} skipped")
+                    logger.info(f"Successfully found {len(out)} industries")
+                    return out
+                    
+                finally:
+                    await page.close()
+                    await context.close()
+                    await browser.close()
+                    await p.stop()
+                    
+            except Exception as e:
+                logger.error(f"Attempt {retry + 1} failed: {e}")
+                
+                if retry < max_retries - 1:
+                    wait_time = (retry + 1) * retry_delay  # Tăng thời gian chờ mỗi lần retry
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error("All attempts failed. Returning empty list.")
+                    return []
 
     async def _apply_industry_filter(self, page, industry_name: str):
         """Mở Select2, chọn đúng ngành theo *tên*, rồi bấm nút btn-company để apply filter."""
