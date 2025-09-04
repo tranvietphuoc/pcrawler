@@ -37,7 +37,7 @@ xpath:
 
 crawl4ai:
   website_query: "Return only business emails found in Contact/About/Footer. Output exactly: emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
-  facebook_query: "Return only business emails from Facebook About/Intro/Contact. Output exactly: emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
+  facebook_query: "Return only emails from Facebook About/Intro/Contact section. Output exactly: emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
 
 processing:
   # batch_size: 30 (cũ)
