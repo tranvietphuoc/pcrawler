@@ -299,40 +299,57 @@ class ListCrawler:
         sep = "&" if "?" in base_filtered_url else "?"
         return f"{base_filtered_url}{sep}page={page_num}"
 
-    async def get_company_links_for_page(self, page_url: str):
-        # giữ nguyên: mở URL và lôi link "tổng quan"
-        for i in range(self.max_retries):
-            try:
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        args=[
-                            "--no-sandbox",
-                            "--disable-setuid-sandbox",
-                            "--disable-dev-shm-usage",
-                        ],
-                    )
-                    context = await browser.new_context()
-                    page = await context.new_page()
-                    try:
-                        await page.goto(
-                            page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
+    async def get_company_links_for_page(self, page_url: str, page=None):
+        # Sử dụng lại page đã có hoặc tạo mới nếu cần
+        if page is None:
+            # Fallback: tạo browser mới nếu không có page
+            for i in range(self.max_retries):
+                try:
+                    async with async_playwright() as p:
+                        browser = await p.chromium.launch(
+                            headless=True,
+                            args=[
+                                "--no-sandbox",
+                                "--disable-setuid-sandbox",
+                                "--disable-dev-shm-usage",
+                            ],
                         )
-                        await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
-                        locs = await page.locator(self.config.get_xpath("company_links")).all()
-                        return [
-                            await a.get_attribute("href")
-                            for a in locs
-                            if await a.get_attribute("href")
-                        ]
-                    finally:
-                        await page.close()
-                        await context.close()
-                        await browser.close()
+                        context = await browser.new_context()
+                        page = await context.new_page()
+                        try:
+                            await page.goto(
+                                page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
+                            )
+                            await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+                            locs = await page.locator(self.config.get_xpath("company_links")).all()
+                            return [
+                                await a.get_attribute("href")
+                                for a in locs
+                                if await a.get_attribute("href")
+                            ]
+                        finally:
+                            await page.close()
+                            await context.close()
+                            await browser.close()
+                except Exception:
+                    if i == self.max_retries - 1:
+                        return []
+                    await asyncio.sleep(random.uniform(1, 2))
+        else:
+            # Sử dụng page đã có
+            try:
+                await page.goto(
+                    page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
+                )
+                await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+                locs = await page.locator(self.config.get_xpath("company_links")).all()
+                return [
+                    await a.get_attribute("href")
+                    for a in locs
+                    if await a.get_attribute("href")
+                ]
             except Exception:
-                if i == self.max_retries - 1:
-                    return []
-                await asyncio.sleep(random.uniform(1, 2))
+                return []
 
     async def get_company_links_for_industry(
         self, base_url: str, industry_value: str, industry_name: str
@@ -362,7 +379,7 @@ class ListCrawler:
 
             # Gom link "tổng quan" song song theo từng trang
             res = await asyncio.gather(
-                *[self.get_company_links_for_page(u) for u in page_urls],
+                *[self.get_company_links_for_page(u, page) for u in page_urls],
                 return_exceptions=True,
             )
             seen, uniq = set(), []
