@@ -377,18 +377,19 @@ class ListCrawler:
             # Tạo danh sách URL các trang đã lọc
             page_urls = [self._build_page_url(filtered_url, i) for i in range(1, total + 1)]
 
-            # Gom link "tổng quan" song song theo từng trang
-            res = await asyncio.gather(
-                *[self.get_company_links_for_page(u, page) for u in page_urls],
-                return_exceptions=True,
-            )
+            # Gom link "tổng quan" tuần tự theo từng trang
             seen, uniq = set(), []
-            for r in res:
-                if isinstance(r, list):
-                    for l in r:
-                        if l and l not in seen:
-                            seen.add(l)
-                            uniq.append(l)
+            for page_url in page_urls:
+                try:
+                    links = await self.get_company_links_for_page(page_url, page)
+                    if isinstance(links, list):
+                        for link in links:
+                            if link and link not in seen:
+                                seen.add(link)
+                                uniq.append(link)
+                except Exception as e:
+                    print(f"[ERROR] Failed to crawl page {page_url}: {e}")
+                    continue
             return uniq
         finally:
             # Đóng browser SAU KHI crawl xong tất cả các trang
