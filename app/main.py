@@ -81,7 +81,7 @@ async def run(
 
     # Gộp tất cả file CSV
     logger.info("Starting to merge all CSV files...")
-    merge_result = merge_csv_files.delay(output_dir, final_output_path, config_name, 0.7, 3)  # 70% N/A threshold, max 3 emails
+    merge_result = merge_csv_files.delay(output_dir, final_output_path, config_name, 0.7)  # 70% N/A threshold
     try:
         merge_info = merge_result.get(timeout=1800)  # timeout 30 phút
         logger.info(f"Merge file completed: {merge_info['total_rows']} rows from {merge_info['files_merged']} files")
