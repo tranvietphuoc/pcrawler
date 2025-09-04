@@ -356,25 +356,26 @@ class ListCrawler:
 
             # Lấy tổng số trang ngay trên trang hiện tại
             total = await self._get_total_pages_current(page)
+
+            # Tạo danh sách URL các trang đã lọc
+            page_urls = [self._build_page_url(filtered_url, i) for i in range(1, total + 1)]
+
+            # Gom link "tổng quan" song song theo từng trang
+            res = await asyncio.gather(
+                *[self.get_company_links_for_page(u) for u in page_urls],
+                return_exceptions=True,
+            )
+            seen, uniq = set(), []
+            for r in res:
+                if isinstance(r, list):
+                    for l in r:
+                        if l and l not in seen:
+                            seen.add(l)
+                            uniq.append(l)
+            return uniq
         finally:
+            # Đóng browser SAU KHI crawl xong tất cả các trang
             await page.close()
             await context.close()
             await browser.close()
             await p.stop()
-
-        # Tạo danh sách URL các trang đã lọc
-        page_urls = [self._build_page_url(filtered_url, i) for i in range(1, total + 1)]
-
-        # Gom link "tổng quan" song song theo từng trang
-        res = await asyncio.gather(
-            *[self.get_company_links_for_page(u) for u in page_urls],
-            return_exceptions=True,
-        )
-        seen, uniq = set(), []
-        for r in res:
-            if isinstance(r, list):
-                for l in r:
-                    if l and l not in seen:
-                        seen.add(l)
-                        uniq.append(l)
-        return uniq
