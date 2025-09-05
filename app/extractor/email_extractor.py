@@ -29,26 +29,14 @@ class EmailExtractor:
         self.max_retries = max_retries or self.config.processing_config["max_retries"]
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
 
-        # Set unique database path per worker để tránh lock
-        import os
-        worker_id = os.environ.get('CELERY_WORKER_ID', f'worker_{os.getpid()}')
-        db_path = f"/tmp/crawl4ai_worker_{worker_id}.db"
-        os.environ['CRAWL4AI_DB_PATH'] = db_path
-        os.environ['CRAWL4AI_DB_TIMEOUT'] = '60000'  # 60 seconds timeout
+        # Không dùng database để tránh lock hoàn toàn
+        os.environ['CRAWL4AI_DB_PATH'] = ''  # Disable database
+        os.environ['CRAWL4AI_DB_TIMEOUT'] = '0'  # No timeout
 
         try:
-            # Cleanup old database file if exists
-            if os.path.exists(db_path):
-                try:
-                    os.remove(db_path)
-                    # print(f"[EmailExtractor] Cleaned up old database: {db_path}")
-                except Exception as e:
-                    print(f"[EmailExtractor] Warning: Could not clean up old database: {e}")
-                    # pass
-            
             self.crawler = AsyncWebCrawler() if AsyncWebCrawler else None
             if self.crawler:
-                print(f"[EmailExtractor] Initialized with database: {db_path}")
+                print(f"[EmailExtractor] Initialized without database (no caching)")
         except Exception as e:
             print(f"[EmailExtractor] Failed to initialize crawler: {e}")
             self.crawler = None
