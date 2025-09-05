@@ -30,12 +30,22 @@ class EmailExtractor:
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
 
         # Set unique database path per worker để tránh lock
-        worker_id = os.environ.get('CELERY_WORKER_ID', 'default')
+        import os
+        worker_id = os.environ.get('CELERY_WORKER_ID', f'worker_{os.getpid()}')
         db_path = f"/tmp/crawl4ai_worker_{worker_id}.db"
         os.environ['CRAWL4AI_DB_PATH'] = db_path
-        os.environ['CRAWL4AI_DB_TIMEOUT'] = '30000'  # 30 seconds timeout
+        os.environ['CRAWL4AI_DB_TIMEOUT'] = '60000'  # 60 seconds timeout
 
         try:
+            # Cleanup old database file if exists
+            if os.path.exists(db_path):
+                try:
+                    os.remove(db_path)
+                    # print(f"[EmailExtractor] Cleaned up old database: {db_path}")
+                except Exception as e:
+                    print(f"[EmailExtractor] Warning: Could not clean up old database: {e}")
+                    # pass
+            
             self.crawler = AsyncWebCrawler() if AsyncWebCrawler else None
             if self.crawler:
                 print(f"[EmailExtractor] Initialized with database: {db_path}")
