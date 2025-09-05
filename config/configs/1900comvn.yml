@@ -41,11 +41,11 @@ crawl4ai:
 
 processing:
   # batch_size: 30 (cũ)
-  batch_size: 50  # Tăng từ 30 lên 50 - tận dụng CPU mạnh
+  batch_size: 100  # Tăng từ 30 lên 100 - giảm số tasks
   # write_batch_size: 150 (cũ)
   write_batch_size: 200  # Tăng từ 150 lên 200
   # max_concurrent_pages: 5 (cũ)
-  max_concurrent_pages: 8  # Tăng từ 5 lên 8 - phù hợp 50% CPU
+  max_concurrent_pages: 5  # Giảm từ 8 xuống 5 - batch size cao
   max_retries: 5  # Giữ nguyên
   # delay_range: [3, 8] (cũ) - tăng từ [2,6] lên [3,8] - đợi lâu hơn
   delay_range: [2, 5]  # Giảm từ [3,8] xuống [2,5] - CPU mạnh xử lý nhanh
@@ -65,7 +65,7 @@ processing:
   industry_scroll_timeout: 120000  # Tăng từ 90s lên 120s
   industry_retry_delay: 3  # Giữ nguyên
   # Email extraction settings - đơn giản và hiệu quả
-  email_extraction_timeout: 90000  # Tăng từ 60s lên 90s - Facebook cần thời gian lâu
+  email_extraction_timeout: 30000  # Giảm từ 90s xuống 30s - batch size cao
   email_retry_delay: [4, 8]  # Delay có jitter, cân bằng tốc độ/ổn định
 
 output:
