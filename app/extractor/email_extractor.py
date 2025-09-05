@@ -115,11 +115,18 @@ class EmailExtractor:
                         observer.observe(document.body, { childList: true, subtree: true });
                     """
                 
-                # Crawl với init_script nếu có
+                # Crawl với init_script nếu có và timeout
+                timeout = self.config.processing_config.get("email_extraction_timeout", 30000)
                 if init_script:
-                    res = await self.crawler.arun(url=url, query=query, init_script=init_script)
+                    res = await asyncio.wait_for(
+                        self.crawler.arun(url=url, query=query, init_script=init_script),
+                        timeout=timeout/1000
+                    )
                 else:
-                    res = await self.crawler.arun(url=url, query=query)
+                    res = await asyncio.wait_for(
+                        self.crawler.arun(url=url, query=query),
+                        timeout=timeout/1000
+                    )
                     
                 content = (
                     getattr(res, "text", None)
@@ -133,10 +140,14 @@ class EmailExtractor:
                     
                 await asyncio.sleep(random.uniform(*self.delay_range))
                 
+            except asyncio.TimeoutError:
+                print(f"[EmailExtractor] Timeout after {timeout/1000}s for {url}")
+                if i < self.max_retries - 1:
+                    await asyncio.sleep(random.uniform(4, 8))
             except Exception as e:
                 print(f"[EmailExtractor] Crawl attempt {i+1} failed for {url}: {e}")
                 if i < self.max_retries - 1:
-                    await asyncio.sleep(random.uniform(3, 6))
+                    await asyncio.sleep(random.uniform(4, 8))
                     
         return None
 

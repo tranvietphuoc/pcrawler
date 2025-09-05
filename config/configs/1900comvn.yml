@@ -53,16 +53,16 @@ processing:
   batch_delay: [4, 8]  # Giảm từ [6,12] xuống [4,8]
   # session_delay: [12, 25] (cũ)
   session_delay: [8, 15]  # Giảm từ [12,25] xuống [8,15]
-  timeout: 90000  # Giữ nguyên
-  network_timeout: 60000  # Giữ nguyên
+  timeout: 120000  # Tăng từ 90s lên 120s cho industry lớn
+  network_timeout: 90000  # Tăng từ 60s lên 90s
   # page_load_wait: 2000 (cũ)
   page_load_wait: 1500  # Giảm từ 2000 xuống 1500
   # js_load_wait: 3000 (cũ)
   js_load_wait: 2000  # Giảm từ 3000 xuống 2000
   stealth_mode: true
   # Industry loading settings - đơn giản
-  industry_load_timeout: 60000  # Giữ nguyên
-  industry_scroll_timeout: 90000  # Giữ nguyên
+  industry_load_timeout: 90000  # Tăng từ 60s lên 90s
+  industry_scroll_timeout: 120000  # Tăng từ 90s lên 120s
   industry_retry_delay: 3  # Giữ nguyên
   # Email extraction settings - đơn giản và hiệu quả
   email_extraction_timeout: 60000  # 60s - phù hợp mạng chậm

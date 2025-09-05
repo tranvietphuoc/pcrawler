@@ -377,23 +377,27 @@ class ListCrawler:
             # Tạo danh sách URL các trang đã lọc
             page_urls = [self._build_page_url(filtered_url, i) for i in range(1, total + 1)]
 
-            # Gom link "tổng quan" tuần tự theo từng trang
-            seen, uniq = set(), []
-            for page_url in page_urls:
-                try:
-                    links = await self.get_company_links_for_page(page_url, page)
-                    if isinstance(links, list):
-                        for link in links:
-                            if link and link not in seen:
-                                seen.add(link)
-                                uniq.append(link)
-                except Exception as e:
-                    print(f"[ERROR] Failed to crawl page {page_url}: {e}")
-                    continue
-            return uniq
         finally:
-            # Đóng browser SAU KHI crawl xong tất cả các trang
-            await page.close()
-            await context.close()
-            await browser.close()
-            await p.stop()
+            # Đóng browser ngay sau khi lấy được filtered_url để tránh conflict
+            try:
+                await page.close()
+                await context.close()
+                await browser.close()
+                await p.stop()
+            except Exception as e:
+                print(f"[WARNING] Error closing browser: {e}")
+
+        # Gom link "tổng quan" tuần tự theo từng trang - KHÔNG reuse page
+        seen, uniq = set(), []
+        for page_url in page_urls:
+            try:
+                links = await self.get_company_links_for_page(page_url, None)  # Không reuse page
+                if isinstance(links, list):
+                    for link in links:
+                        if link and link not in seen:
+                            seen.add(link)
+                            uniq.append(link)
+            except Exception as e:
+                print(f"[ERROR] Failed to crawl page {page_url}: {e}")
+                continue
+        return uniq
