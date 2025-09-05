@@ -117,6 +117,10 @@ class EmailExtractor:
                 
                 # Crawl với init_script nếu có và timeout
                 timeout = self.config.processing_config.get("email_extraction_timeout", 30000)
+                # Facebook URLs cần timeout dài hơn
+                if "facebook.com" in url.lower():
+                    timeout = max(timeout, 120000)  # Ít nhất 120s cho Facebook
+                
                 if init_script:
                     res = await asyncio.wait_for(
                         self.crawler.arun(url=url, query=query, init_script=init_script),

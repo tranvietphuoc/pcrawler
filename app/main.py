@@ -72,12 +72,21 @@ async def run(
 
     # Chờ tất cả task hoàn thành
     logger.info(f"Waiting for {len(task_results)} tasks to complete...")
+    completed_tasks = 0
+    failed_tasks = 0
+    
     for result in task_results:
         try:
             task_info = result.get(timeout=3600)  # timeout 1 giờ
             logger.info(f"Task {task_info['task_id']} completed: {task_info['rows_processed']} rows")
+            completed_tasks += 1
         except Exception as e:
             logger.error(f"Task failed: {e}")
+            failed_tasks += 1
+            # Tiếp tục với task tiếp theo thay vì dừng
+            continue
+    
+    logger.info(f"Task completion summary: {completed_tasks} completed, {failed_tasks} failed")
 
     # Gộp tất cả file CSV
     logger.info("Starting to merge all CSV files...")

@@ -65,7 +65,7 @@ processing:
   industry_scroll_timeout: 120000  # Tăng từ 90s lên 120s
   industry_retry_delay: 3  # Giữ nguyên
   # Email extraction settings - đơn giản và hiệu quả
-  email_extraction_timeout: 60000  # 60s - phù hợp mạng chậm
+  email_extraction_timeout: 90000  # Tăng từ 60s lên 90s - Facebook cần thời gian lâu
   email_retry_delay: [4, 8]  # Delay có jitter, cân bằng tốc độ/ổn định
 
 output:
