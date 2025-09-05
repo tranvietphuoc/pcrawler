@@ -7,7 +7,7 @@ services:
     volumes:
       - redis-data:/data
     # Tối ưu Redis cho CPU nhiều cores
-    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru --save "" --appendonly no
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
 
   worker:
     build: .
@@ -15,30 +15,30 @@ services:
     # shm_size: "1g" # optimized for 4-core CPU (cũ)
     shm_size: "2g" # Tăng từ 1g lên 2g cho CPU mạnh
     # mem_limit: "3g" # giới hạn RAM cứng cho worker (cũ)
-    mem_limit: "8g" # Tăng từ 3g lên 8g - tận dụng 32GB RAM
+    mem_limit: "12g" # Giảm từ 20g xuống 12g - scale 2 workers
     # mem_reservation: "2g" # gợi ý mức RAM tối thiểu (cũ)
-    mem_reservation: "6g" # Tăng từ 2g lên 6g
+    mem_reservation: "8g" # Giảm từ 12g xuống 8g
     # Tối ưu cho CPU 20 cores - sử dụng 50% (10/20 cores)
     deploy:
       resources:
         limits:
           # cpus: '16.0' # Sử dụng 16/20 cores cho worker (quá cao)
           cpus: "10.0" # Sử dụng 10/20 cores cho worker (50% CPU)
-          memory: 8G
+          memory: 12G
         reservations:
           # cpus: '12.0' # Đảm bảo ít nhất 12 cores (cũ)
           cpus: "8.0" # Đảm bảo ít nhất 8 cores (40% CPU)
-          memory: 6G
+          memory: 8G
     environment:
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       - CELERY_WORKER_HEARTBEAT=30
       # - CELERY_WORKER_MAX_TASKS_PER_CHILD=20 # 2GB mỗi child (cũ)
-      - CELERY_WORKER_MAX_TASKS_PER_CHILD=100 # Tăng từ 50 lên 100
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=200 # Tăng từ 100 lên 200
       # - CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000 # 2GB mỗi child (cũ)
-      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=4000000 # Tăng từ 2GB lên 4GB
+      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000 # Giảm từ 4GB xuống 2GB - scale 2 workers
       # - CELERY_WORKER_CONCURRENCY=4 # Sử dụng 4 cores (cũ)
-      - CELERY_WORKER_CONCURRENCY=15 # Tăng từ 10 lên 15 cores
+      - CELERY_WORKER_CONCURRENCY=8 # Giảm từ 15 xuống 8 cores
       # - CELERY_WORKER_PREFETCH_MULTIPLIER=1 # Tăng từ 1 lên 2 (cũ)
       - CELERY_WORKER_PREFETCH_MULTIPLIER=2 # Tăng từ 1 lên 2
     volumes: ["./data:/app/data"]
@@ -46,10 +46,10 @@ services:
       celery -A app.tasks.celery_app worker
       --loglevel=INFO
       -Q crawl
-      -c 15
+      -c 8
       --prefetch-multiplier=2
       --without-heartbeat
-      --max-memory-per-child=4000000
+      --max-memory-per-child=2000000
 
   app:
     build: .
