@@ -38,7 +38,7 @@ services:
       # - CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000 # 2GB mỗi child (cũ)
       - CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000 # Giảm từ 4GB xuống 2GB - scale 2 workers
       # - CELERY_WORKER_CONCURRENCY=4 # Sử dụng 4 cores (cũ)
-      - CELERY_WORKER_CONCURRENCY=8 # Giảm từ 15 xuống 8 cores
+      - CELERY_WORKER_CONCURRENCY=4 # Giảm từ 8 xuống 4 cores - per-task memory
       # - CELERY_WORKER_PREFETCH_MULTIPLIER=1 # Tăng từ 1 lên 2 (cũ)
       - CELERY_WORKER_PREFETCH_MULTIPLIER=2 # Tăng từ 1 lên 2
     volumes: ["./data:/app/data"]
@@ -46,7 +46,7 @@ services:
       celery -A app.tasks.celery_app worker
       --loglevel=INFO
       -Q crawl
-      -c 8
+      -c 4
       --prefetch-multiplier=2
       --without-heartbeat
       --max-memory-per-child=2000000

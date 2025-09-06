@@ -9,21 +9,10 @@ try:
 except Exception:
     AsyncWebCrawler = None
 
-# Global instance per worker process
-_worker_extractor = None
-
-
+# Per-task instance - không dùng singleton
 class EmailExtractor:
-    def __new__(cls, *args, **kwargs):
-        global _worker_extractor
-        if _worker_extractor is None:
-            _worker_extractor = super().__new__(cls)
-        return _worker_extractor
 
     def __init__(self, config: CrawlerConfig = None, max_retries: int = None, delay_range=None):
-        # Chỉ init một lần
-        if hasattr(self, '_initialized'):
-            return
 
         self.config = config or CrawlerConfig()
         self.max_retries = max_retries or self.config.processing_config["max_retries"]
@@ -47,7 +36,7 @@ class EmailExtractor:
         ]
         self.invalid_email = [r"noreply@", r"no-reply@", r"example\.com", r"@\d+\.\d+"]
 
-        self._initialized = True
+        print(f"[EmailExtractor] Created new instance for task")
 
     def _find_emails(self, text):
         """Tìm emails từ text sử dụng regex patterns"""
@@ -162,6 +151,10 @@ class EmailExtractor:
         """Extract emails từ Facebook"""
         query = self.config.get_crawl4ai_query("facebook")
         return await self._crawl(fb, query)
+    
+    async def _crawl_with_query(self, url: str, query: str):
+        """Crawl với custom query (cho backup crawler)"""
+        return await self._crawl(url, query)
 
     def cleanup(self):
         """Cleanup resources - sync version"""

@@ -70,3 +70,16 @@ docker-crawl:
 docker-merge:
 	@echo "Merging CSV files..."
 	docker-compose run --rm app python merge_files.py --output-dir data/tasks --final-output data/company_contacts.csv --config 1900comvn
+
+# Backup crawl commands
+backup-check:
+	@echo "Checking for merged file and starting backup crawl..."
+	docker-compose run --rm app python -m app.main backup-check
+
+backup-crawl:
+	@echo "Starting backup crawl for N/A emails..."
+	docker-compose run --rm app python -m app.main backup-crawl --file data/company_contacts.csv
+
+backup-deep:
+	@echo "Starting deep crawl (direct mode)..."
+	docker-compose run --rm app python -m app.main backup-deep --file data/company_contacts.csv --batch-size 5

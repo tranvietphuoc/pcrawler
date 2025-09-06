@@ -5,9 +5,11 @@ import glob
 import re
 import gc
 import psutil
+import pandas as pd
 from typing import List, Dict
 from .celery_app import celery_app
 from app.crawler.detail_crawler import DetailCrawler
+from app.crawler.backup_crawler import BackupCrawler
 from app.extractor.email_extractor import EmailExtractor
 from app.utils.batching_writer import safe_append_rows_csv
 from config import CrawlerConfig
@@ -304,3 +306,134 @@ def merge_csv_files(output_dir: str, final_output_path: str, config_name: str = 
         "max_na_percentage": max_na_percentage,
         "max_emails": 3
     }
+
+
+@celery_app.task(name="backup.crawl_na_emails", bind=True)
+def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
+    """
+    Backup crawl các dòng có extracted_emails = N/A
+    """
+    try:
+        config = CrawlerConfig()
+        backup_crawler = BackupCrawler(config)
+        
+        # Load file và filter N/A rows
+        na_rows = backup_crawler.load_merged_file(merged_file_path)
+        
+        if na_rows.empty:
+            print("No N/A emails found, backup crawl completed")
+            return {
+                'status': 'completed',
+                'message': 'No N/A emails found',
+                'total_rows': 0,
+                'updated_rows': 0
+            }
+        
+        print(f"Starting backup crawl for {len(na_rows)} N/A rows")
+        
+        # Process theo batch
+        backup_results = []
+        total_rows = len(na_rows)
+        
+        for i in range(0, total_rows, batch_size):
+            batch = na_rows.iloc[i:i + batch_size]
+            
+            # Process batch
+            batch_results = []
+            for _, row in batch.iterrows():
+                try:
+                    result = asyncio.run(backup_crawler.deep_crawl_emails(row))
+                    batch_results.append(result)
+                    
+                    # Update progress
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={
+                            'current': i + len(batch_results),
+                            'total': total_rows,
+                            'status': f'Processing {row["name"]}'
+                        }
+                    )
+                    
+                except Exception as e:
+                    print(f"Error processing {row['name']}: {e}")
+                    continue
+            
+            backup_results.extend(batch_results)
+            
+            # Log progress
+            print(f"Processed batch {i//batch_size + 1}: {len(batch_results)} results")
+        
+        # Update merged file (ghi đè file gốc)
+        updated_file = backup_crawler.update_merged_file(merged_file_path, backup_results)
+        
+        # Count updated rows (chỉ đếm những dòng thực sự được update từ N/A)
+        updated_count = len([r for r in backup_results if r['extracted_emails'] != 'N/A'])
+        
+        print(f"Backup crawl completed: {updated_count}/{total_rows} N/A rows updated")
+        print(f"Updated file: {updated_file}")
+        
+        return {
+            'status': 'completed',
+            'message': f'Backup crawl completed: {updated_count}/{total_rows} N/A rows updated',
+            'total_rows': total_rows,
+            'updated_rows': updated_count,
+            'updated_file': updated_file
+        }
+        
+    except Exception as e:
+        print(f"Backup crawl failed: {e}")
+        return {
+            'status': 'failed',
+            'message': str(e),
+            'total_rows': 0,
+            'updated_rows': 0
+        }
+
+
+@celery_app.task(name="backup.check_and_crawl")
+def check_and_backup_crawl(merged_file_path: str = None):
+    """
+    Check nếu có file merged, load và backup crawl N/A emails
+    Nếu chưa có, chạy crawl từ đầu
+    """
+    try:
+        # Tìm file merged
+        if not merged_file_path:
+            config = CrawlerConfig()
+            merged_file_path = config.output_config["final_output"]
+        
+        if not os.path.exists(merged_file_path):
+            print(f"Merged file not found: {merged_file_path}")
+            print("Starting full crawl from beginning...")
+            
+            # Import và chạy full crawl
+            from app.main import run
+            result = asyncio.run(run())
+            return {
+                'status': 'full_crawl_completed',
+                'message': 'Full crawl completed',
+                'result': result
+            }
+        
+        # File đã tồn tại, backup crawl N/A emails
+        print(f"Found merged file: {merged_file_path}")
+        print("Starting backup crawl for N/A emails...")
+        
+        # Chạy backup crawl task và chờ kết quả
+        backup_task = backup_crawl_na_emails.delay(merged_file_path)
+        result = backup_task.get(timeout=3600)  # timeout 1 giờ
+        
+        return {
+            'status': 'backup_crawl_completed',
+            'message': 'Backup crawl completed',
+            'result': result,
+            'merged_file': merged_file_path
+        }
+        
+    except Exception as e:
+        print(f"Check and backup crawl failed: {e}")
+        return {
+            'status': 'failed',
+            'message': str(e)
+        }
