@@ -309,13 +309,17 @@ def merge_csv_files(output_dir: str, final_output_path: str, config_name: str = 
 
 
 @celery_app.task(name="backup.crawl_na_emails", bind=True)
-async def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
+def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
     """
     Backup crawl các dòng có extracted_emails = N/A
     """
     try:
         config = CrawlerConfig()
         backup_crawler = BackupCrawler(config)
+        
+        # Tạo event loop mới cho task này
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
         # Load file và filter N/A rows
         na_rows = backup_crawler.load_merged_file(merged_file_path)
@@ -342,7 +346,7 @@ async def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 
             batch_results = []
             for _, row in batch.iterrows():
                 try:
-                    result = await backup_crawler.deep_crawl_emails(row)
+                    result = loop.run_until_complete(backup_crawler.deep_crawl_emails(row))
                     batch_results.append(result)
                     
                     # Update progress
@@ -389,6 +393,13 @@ async def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 
             'total_rows': 0,
             'updated_rows': 0
         }
+    finally:
+        # Cleanup event loop
+        try:
+            if 'loop' in locals():
+                loop.close()
+        except Exception as cleanup_error:
+            print(f"Event loop cleanup error: {cleanup_error}")
 
 
 @celery_app.task(name="backup.check_and_crawl")
