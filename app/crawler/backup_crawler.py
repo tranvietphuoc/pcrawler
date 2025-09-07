@@ -55,9 +55,13 @@ class BackupCrawler:
             emails = await self._deep_crawl_strategies(row)
             
             if emails:
-                result['extracted_emails'] = '; '.join(emails)
+                # Limit emails như detail crawl
+                max_emails = self.config.processing_config.get("max_emails", 3)
+                limited_emails = emails[:max_emails]
+                
+                result['extracted_emails'] = '; '.join(limited_emails)
                 result['email_source'] = 'Deep Crawl'
-                logger.info(f"Deep crawl success for {row['name']}: {emails}")
+                logger.info(f"Deep crawl success for {row['name']}: {limited_emails}")
             else:
                 logger.warning(f"Deep crawl failed for {row['name']}")
                 
@@ -154,18 +158,28 @@ class BackupCrawler:
             df = pd.read_csv(original_file)
             logger.info(f"Loaded {len(df)} rows from {original_file}")
             
-            # Update rows với backup results
+            # Update rows với backup results - duplicate như detail crawl
             updated_count = 0
             for result in backup_results:
-                mask = df['name'] == result['name']
-                if mask.any():
-                    old_email = df.loc[mask, 'extracted_emails'].iloc[0]
-                    df.loc[mask, 'extracted_emails'] = result['extracted_emails']
-                    df.loc[mask, 'email_source'] = result['email_source']
+                if result['extracted_emails'] != 'N/A':
+                    emails = result['extracted_emails'].split('; ')
                     
-                    if old_email == 'N/A' and result['extracted_emails'] != 'N/A':
-                        updated_count += 1
-                        logger.info(f"Updated {result['name']}: {old_email} → {result['extracted_emails']}")
+                    # Tìm row gốc
+                    mask = df['name'] == result['name']
+                    if mask.any():
+                        original_row = df.loc[mask].iloc[0].copy()
+                        
+                        # Xóa row gốc
+                        df = df.drop(df[mask].index)
+                        
+                        # Tạo multiple rows cho mỗi email
+                        for email in emails:
+                            new_row = original_row.copy()
+                            new_row['extracted_emails'] = email.strip()
+                            new_row['email_source'] = result['email_source']
+                            df = pd.concat([df, new_row.to_frame().T], ignore_index=True)
+                            updated_count += 1
+                            logger.info(f"Created row for {result['name']}: {email.strip()}")
             
             # Save updated file (ghi đè file gốc)
             df.to_csv(original_file, index=False)
