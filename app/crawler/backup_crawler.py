@@ -21,9 +21,19 @@ class BackupCrawler:
             df = pd.read_csv(file_path)
             logger.info(f"Loaded {len(df)} rows from {file_path}")
             
-            # Filter các dòng có extracted_emails = N/A
-            na_rows = df[df['extracted_emails'] == 'N/A']
-            logger.info(f"Found {len(na_rows)} rows with N/A emails")
+            # Filter các dòng có extracted_emails = N/A, empty, hoặc NaN
+            na_condition = (
+                (df['extracted_emails'] == 'N/A') |
+                (df['extracted_emails'].isna()) |
+                (df['extracted_emails'] == '') |
+                (df['extracted_emails'].str.strip() == '')
+            )
+            na_rows = df[na_condition]
+            logger.info(f"Found {len(na_rows)} rows with N/A/empty emails")
+            
+            # Debug: show sample of extracted_emails values
+            unique_emails = df['extracted_emails'].value_counts(dropna=False).head(10)
+            logger.info(f"Sample extracted_emails values: {unique_emails.to_dict()}")
             
             return na_rows
         except Exception as e:
