@@ -22,13 +22,8 @@ class EmailExtractor:
         os.environ['CRAWL4AI_DB_PATH'] = ''  # Disable database
         os.environ['CRAWL4AI_DB_TIMEOUT'] = '0'  # No timeout
 
-        try:
-            self.crawler = AsyncWebCrawler() if AsyncWebCrawler else None
-            if self.crawler:
-                print(f"[EmailExtractor] Initialized without database (no caching)")
-        except Exception as e:
-            print(f"[EmailExtractor] Failed to initialize crawler: {e}")
-            self.crawler = None
+        # Không tạo crawler trong __init__ để tránh event loop conflict
+        self.crawler = None
 
         self.email_patterns = [
             r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
@@ -60,9 +55,22 @@ class EmailExtractor:
         ]
         return emails
 
+    async def _get_crawler(self):
+        """Lazy initialization của crawler trong event loop hiện tại"""
+        if not self.crawler:
+            try:
+                self.crawler = AsyncWebCrawler() if AsyncWebCrawler else None
+                if self.crawler:
+                    print(f"[EmailExtractor] Created crawler in current event loop")
+            except Exception as e:
+                print(f"[EmailExtractor] Failed to create crawler: {e}")
+                self.crawler = None
+        return self.crawler
+
     async def _crawl(self, url: str, query: str):
         """Crawl URL với retry logic"""
-        if not self.crawler or not url or url in ("N/A", ""):
+        crawler = await self._get_crawler()
+        if not crawler or not url or url in ("N/A", ""):
             return None
             
         if not url.startswith(("http://", "https://")):
@@ -110,12 +118,12 @@ class EmailExtractor:
                 
                 if init_script:
                     res = await asyncio.wait_for(
-                        self.crawler.arun(url=url, query=query, init_script=init_script),
+                        crawler.arun(url=url, query=query, init_script=init_script),
                         timeout=timeout/1000
                     )
                 else:
                     res = await asyncio.wait_for(
-                        self.crawler.arun(url=url, query=query),
+                        crawler.arun(url=url, query=query),
                         timeout=timeout/1000
                     )
                     
