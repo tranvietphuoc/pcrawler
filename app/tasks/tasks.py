@@ -309,7 +309,7 @@ def merge_csv_files(output_dir: str, final_output_path: str, config_name: str = 
 
 
 @celery_app.task(name="backup.crawl_na_emails", bind=True)
-def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
+async def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
     """
     Backup crawl các dòng có extracted_emails = N/A
     """
@@ -342,7 +342,7 @@ def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
             batch_results = []
             for _, row in batch.iterrows():
                 try:
-                    result = asyncio.run(backup_crawler.deep_crawl_emails(row))
+                    result = await backup_crawler.deep_crawl_emails(row)
                     batch_results.append(result)
                     
                     # Update progress

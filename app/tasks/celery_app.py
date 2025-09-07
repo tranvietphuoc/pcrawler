@@ -21,3 +21,5 @@ celery_app.conf.task_routes = {
     "crawl.details_extract_write": {"queue": "crawl"},
     "merge.csv_files": {"queue": "crawl"},
 }
+
+# Celery sẽ tự quản lý event loop với asyncio support
