@@ -4,9 +4,13 @@ import uuid
 import pandas as pd
 from typing import List, Dict, Any
 from app.crawler.list_crawler import ListCrawler
-from app.crawler.detail_crawler import DetailCrawler
-from app.crawler.backup_crawler import BackupCrawler
-from app.tasks.tasks import crawl_details_extract_write, merge_csv_files, backup_crawl_na_emails, check_and_backup_crawl
+from app.tasks.html_tasks import (
+    crawl_detail_pages as task_crawl_detail_pages,
+    extract_company_details as task_extract_company_details,
+    crawl_contact_pages_from_details as task_crawl_contact_from_details,
+    extract_emails_from_contact as task_extract_emails_from_contact,
+    create_final_results as task_create_final_results,
+)
 from config import CrawlerConfig
 import sys
 
@@ -41,26 +45,7 @@ async def run(
     # Tạo thư mục output nếu chưa có
     os.makedirs(output_dir, exist_ok=True)
     
-    # KIỂM TRA FILE MERGED TRƯỚC
-    if os.path.exists(final_output_path):
-        logger.info(f"Found existing merged file: {final_output_path}")
-        logger.info("Starting backup crawl for N/A emails...")
-        
-        # Chạy backup crawl task
-        backup_task = backup_crawl_na_emails.delay(final_output_path)
-        logger.info(f"Backup crawl task started: {backup_task.id}")
-        
-        # Chờ backup crawl hoàn thành
-        try:
-            result = backup_task.get(timeout=3600)  # timeout 1 giờ
-            logger.info(f"Backup crawl completed: {result}")
-            return result
-        except Exception as e:
-            logger.error(f"Backup crawl failed: {e}")
-            return {
-                'status': 'backup_failed',
-                'message': str(e)
-            }
+    # BỎ luồng backup-merger cũ. Luồng mới hoàn toàn chạy theo DB phases
     
     # NẾU CHƯA CÓ FILE MERGED → CRAWL TỪ ĐẦU
     logger.info("No merged file found, starting full crawl from beginning...")
@@ -70,68 +55,66 @@ async def run(
     industries = await list_c.get_industries(base_url)
     logger.info(f"Found {len(industries)} industries")
     
-    # Lưu danh sách task để theo dõi
-    task_results = []
-    
+    # PHASE 1: Crawl detail pages -> DB
+    detail_tasks = []
+    total_companies = 0
     for idx, (ind_id, ind_name) in enumerate(industries, start=1):
         links = await list_c.get_company_links_for_industry(base_url, ind_id, ind_name)
-        logger.info(
-            f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies"
-        )
-        
+        logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
+        total_companies += len(links)
         for i in range(0, len(links), batch_size):
-            batch_links = links[i : i + batch_size]
-            # Tạo task_id duy nhất cho mỗi batch
-            task_id = str(uuid.uuid4())
-            
-            result = crawl_details_extract_write.delay(
-                batch_links,
-                ind_name,
-                output_dir,
-                task_id,
-                config_name,
-                max_concurrent_pages,
-                write_batch_size,
-            )
-            task_results.append(result)
-            logger.info(f"Task created: {task_id} for batch {i//batch_size + 1} of industry {ind_name}")
+            batch = links[i:i+batch_size]
+            t = task_crawl_detail_pages.delay(batch, batch_size)
+            detail_tasks.append(t)
+    logger.info(f"Submitted {len(detail_tasks)} detail batches")
 
-    # Chờ tất cả task hoàn thành
-    logger.info(f"Waiting for {len(task_results)} tasks to complete...")
-    completed_tasks = 0
-    failed_tasks = 0
-    
-    for result in task_results:
+    # Wait detail tasks
+    for t in detail_tasks:
         try:
-            task_info = result.get(timeout=3600)  # timeout 1 giờ
-            logger.info(f"Task {task_info['task_id']} completed: {task_info['rows_processed']} rows")
-            completed_tasks += 1
+            t.get(timeout=3600)
         except Exception as e:
-            logger.error(f"Task failed: {e}")
-            failed_tasks += 1
-            # Tiếp tục với task tiếp theo thay vì dừng
-            continue
-    
-    logger.info(f"Task completion summary: {completed_tasks} completed, {failed_tasks} failed")
+            logger.warning(f"Detail batch failed: {e}")
 
-    # Gộp tất cả file CSV
-    logger.info("Starting to merge all CSV files...")
-    merge_result = merge_csv_files.delay(output_dir, final_output_path, config_name, 0.7)  # 70% N/A threshold
+    # PHASE 2: Extract company details from DB
+    logger.info("Extracting company details from stored HTML...")
     try:
-        merge_info = merge_result.get(timeout=1800)  # timeout 30 phút
-        logger.info(f"Merge file completed: {merge_info['total_rows']} rows from {merge_info['files_merged']} files")
-        logger.info(f"Filtered {merge_info['filtered_rows']} NA rows")
-        logger.info(f"Final file: {merge_info['final_file']}")
-        return {
-            "status": "success",
-            "total_industries": len(industries),
-            "total_companies": sum(len(links) for _, links in industries),
-            "final_file": merge_info["final_file"],
-            "total_rows": merge_info["total_rows"],
-        }
+        r = task_extract_company_details.delay(batch_size)
+        r.get(timeout=3600)
     except Exception as e:
-        logger.error(f"Error merging files: {e}")
-        return {"status": "error", "message": f"Error merging files: {e}"}
+        logger.warning(f"Company details extraction encountered issues: {e}")
+
+    # PHASE 3: Crawl contact pages (website/facebook, deep)
+    logger.info("Crawling contact pages (website/facebook) from company_details...")
+    try:
+        r = task_crawl_contact_from_details.delay(batch_size)
+        r.get(timeout=3600)
+    except Exception as e:
+        logger.warning(f"Contact crawling encountered issues: {e}")
+
+    # PHASE 4: Extract emails from contact HTML via Crawl4AI
+    logger.info("Extracting emails from contact HTML via Crawl4AI...")
+    try:
+        r = task_extract_emails_from_contact.delay(batch_size)
+        r.get(timeout=3600)
+    except Exception as e:
+        logger.warning(f"Email extraction encountered issues: {e}")
+
+    # PHASE 5: Build final_results
+    logger.info("Creating final_results table...")
+    try:
+        r = task_create_final_results.delay()
+        res = r.get(timeout=600)
+        logger.info(f"Final results created: {res.get('count', 0)} rows")
+    except Exception as e:
+        logger.error(f"Failed creating final results: {e}")
+        return {"status": "error", "message": str(e)}
+
+    return {
+        "status": "success",
+        "total_industries": len(industries),
+        "total_companies": total_companies,
+        "final_table": "final_results",
+    }
 
 
 def main():

@@ -39,6 +39,7 @@ class CrawlerConfig:
         """Get xpath configuration"""
         return self.config_data.get("xpath", {})
     
+    
     @property
     def crawl4ai_config(self) -> Dict[str, str]:
         """Get crawl4ai configuration"""
@@ -85,6 +86,7 @@ class CrawlerConfig:
     def get_fieldnames(self) -> List[str]:
         """Get CSV fieldnames"""
         return self.fieldnames.copy()
+    
     
     def list_available_configs(self) -> List[str]:
         """List all available configuration files"""

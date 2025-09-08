@@ -35,6 +35,7 @@ xpath:
   # Filter button
   filter_button: "//div[contains(@class,'d-none')]//button[contains(@class,'btn-company')]"
 
+
 crawl4ai:
   website_query: "Return only business emails found in Contact/About/Footer. Output exactly: valid emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
   facebook_query: "Return only business emails from Facebook About/Intro/Contact section. Output exactly: valid emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
@@ -67,6 +68,18 @@ processing:
   # Email extraction settings - đơn giản và hiệu quả
   email_extraction_timeout: 30000  # Giảm từ 90s xuống 30s - batch size cao
   email_retry_delay: [4, 8]  # Delay có jitter, cân bằng tốc độ/ổn định
+  # Deep crawling settings
+  website_deep_paths:
+    - "/contact"
+    - "/contact-us"
+    - "/lien-he"
+    - "/lienhe"
+    - "/about"
+    - "/about-us"
+    - "/gioi-thieu"
+  facebook_about_variants:
+    - "?sk=about"
+    - "/about"
 
 output:
   output_dir: "data/tasks"
