@@ -358,9 +358,9 @@ def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
         
         print(f"Starting backup crawl for {len(na_rows)} N/A rows")
         
-        # Process theo batch
-        backup_results = []
+        # Process theo batch với incremental update
         total_rows = len(na_rows)
+        updated_count = 0
         
         for i in range(0, total_rows, batch_size):
             batch = na_rows.iloc[i:i + batch_size]
@@ -386,26 +386,29 @@ def backup_crawl_na_emails(self, merged_file_path: str, batch_size: int = 10):
                     print(f"Error processing {row['name']}: {e}")
                     continue
             
-            backup_results.extend(batch_results)
+            # Update file ngay sau mỗi batch (incremental update)
+            if batch_results:
+                updated_file = backup_crawler.update_merged_file_incremental(merged_file_path, batch_results)
+                batch_updated = len([r for r in batch_results if r['extracted_emails'] != 'N/A'])
+                updated_count += batch_updated
+                
+                print(f"Batch {i//batch_size + 1}: {batch_updated}/{len(batch_results)} rows updated")
+                print(f"Total updated so far: {updated_count}/{total_rows}")
             
-            # Log progress
-            print(f"Processed batch {i//batch_size + 1}: {len(batch_results)} results")
-        
-        # Update merged file (ghi đè file gốc)
-        updated_file = backup_crawler.update_merged_file(merged_file_path, backup_results)
-        
-        # Count updated rows (chỉ đếm những dòng thực sự được update từ N/A)
-        updated_count = len([r for r in backup_results if r['extracted_emails'] != 'N/A'])
+            # Memory cleanup sau mỗi batch
+            del batch_results
+            import gc
+            gc.collect()
         
         print(f"Backup crawl completed: {updated_count}/{total_rows} N/A rows updated")
-        print(f"Updated file: {updated_file}")
+        print(f"Updated file: {merged_file_path}")
         
         return {
             'status': 'completed',
             'message': f'Backup crawl completed: {updated_count}/{total_rows} N/A rows updated',
             'total_rows': total_rows,
             'updated_rows': updated_count,
-            'updated_file': updated_file
+            'updated_file': merged_file_path
         }
         
     except Exception as e:

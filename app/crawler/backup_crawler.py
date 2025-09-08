@@ -190,3 +190,43 @@ class BackupCrawler:
         except Exception as e:
             logger.error(f"Error updating file: {e}")
             return original_file
+    
+    def update_merged_file_incremental(self, original_file: str, batch_results: List[Dict[str, Any]]) -> str:
+        """Update file đã merge với kết quả backup crawl từng batch (incremental)"""
+        try:
+            # Load original file
+            df = pd.read_csv(original_file)
+            logger.info(f"Loaded {len(df)} rows from {original_file}")
+            
+            # Update rows với batch results - duplicate như detail crawl
+            updated_count = 0
+            for result in batch_results:
+                if result['extracted_emails'] != 'N/A':
+                    emails = result['extracted_emails'].split('; ')
+                    
+                    # Tìm row gốc
+                    mask = df['name'] == result['name']
+                    if mask.any():
+                        original_row = df.loc[mask].iloc[0].copy()
+                        
+                        # Xóa row gốc
+                        df = df.drop(df[mask].index)
+                        
+                        # Tạo multiple rows cho mỗi email
+                        for email in emails:
+                            new_row = original_row.copy()
+                            new_row['extracted_emails'] = email.strip()
+                            new_row['email_source'] = result['email_source']
+                            df = pd.concat([df, new_row.to_frame().T], ignore_index=True)
+                            updated_count += 1
+                            logger.info(f"Created row for {result['name']}: {email.strip()}")
+            
+            # Save updated file (ghi đè file gốc)
+            df.to_csv(original_file, index=False)
+            
+            logger.info(f"Incremental update: {updated_count} rows updated in {original_file}")
+            return original_file
+            
+        except Exception as e:
+            logger.error(f"Error incremental updating file: {e}")
+            return original_file
