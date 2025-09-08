@@ -195,6 +195,14 @@ class EmailExtractor:
             try:
                 if hasattr(self.crawler, 'close'):
                     await self.crawler.close()
+                # Force cleanup browser processes
+                import subprocess
+                try:
+                    # Kill any remaining browser processes
+                    subprocess.run(['pkill', '-f', 'chromium'], capture_output=True)
+                    subprocess.run(['pkill', '-f', 'chrome'], capture_output=True)
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"[EmailExtractor] Async cleanup error: {e}")
             finally:

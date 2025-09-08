@@ -223,11 +223,34 @@ def crawl_details_extract_write(
                     extractor.cleanup()
             except Exception as e:
                 print(f"[WARNING] EmailExtractor cleanup failed: {e}")
+            finally:
+                # Force cleanup
+                del extractor
                 
         # Memory cleanup
         gc.collect()
         mem_after = process.memory_info().rss // (1024 * 1024)
         print(f"[MEMORY][Task {task_id}] after GC: {mem_after} MB (freed ~{max(0, mem_before - mem_after)} MB)")
+        
+        # Force garbage collection nếu memory cao
+        if mem_after > 800:  # Nếu > 800MB (tăng từ 300MB)
+            print(f"[MEMORY][Task {task_id}] High memory usage, forcing cleanup...")
+            gc.collect()
+            import time
+            time.sleep(1)  # Cho OS cleanup
+            
+            # Check system resources
+            try:
+                import psutil
+                system_mem = psutil.virtual_memory()
+                if system_mem.percent > 85:  # Nếu system memory > 85% (tăng từ 80%)
+                    print(f"[SYSTEM] High system memory: {system_mem.percent}%")
+                    # Force cleanup browser processes
+                    import subprocess
+                    subprocess.run(['pkill', '-f', 'chromium'], capture_output=True)
+                    subprocess.run(['pkill', '-f', 'chrome'], capture_output=True)
+            except Exception:
+                pass
 
         return {
             "task_id": task_id,
