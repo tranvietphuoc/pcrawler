@@ -4,21 +4,20 @@ from typing import List, Dict, Any
 from crawl4ai import AsyncWebCrawler
 from app.database.db_manager import DatabaseManager
 from config import CrawlerConfig
+from .base_crawler import BaseCrawler
 import logging
 
 logger = logging.getLogger(__name__)
 
-class DetailDBCrawler:
+class DetailDBCrawler(BaseCrawler):
     def __init__(self, config: CrawlerConfig = None):
-        self.config = config or CrawlerConfig()
+        super().__init__(config)
         self.db_manager = DatabaseManager()
-        self.crawler = None
+        self.max_requests_per_browser = 200  # Override for DetailDBCrawler
         
     async def _get_crawler(self):
-        """Lazy initialization của crawler"""
-        if not self.crawler:
-            self.crawler = AsyncWebCrawler()
-        return self.crawler
+        """Get Crawl4AI crawler using base class method"""
+        return await self._get_crawl4ai_crawler()
     
     async def crawl_detail_page(self, company_url: str, company_name: str, industry: str = None) -> bool:
         """Crawl detail page và lưu HTML vào database"""
@@ -89,14 +88,3 @@ class DetailDBCrawler:
         
         return results
     
-    def cleanup(self):
-        """Cleanup crawler resources"""
-        if self.crawler:
-            try:
-                # Note: AsyncWebCrawler.close() is async, but this method is sync
-                # In real implementation, you'd need to handle this properly
-                pass
-            except Exception as e:
-                logger.error(f"Error cleaning up detail crawler: {e}")
-            finally:
-                self.crawler = None

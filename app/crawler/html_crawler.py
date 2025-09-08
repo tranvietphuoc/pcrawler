@@ -4,21 +4,20 @@ from typing import List, Dict, Any
 from crawl4ai import AsyncWebCrawler
 from app.database.db_manager import DatabaseManager
 from config import CrawlerConfig
+from .base_crawler import BaseCrawler
 import logging
 
 logger = logging.getLogger(__name__)
 
-class HTMLCrawler:
+class HTMLCrawler(BaseCrawler):
     def __init__(self, config: CrawlerConfig = None):
-        self.config = config or CrawlerConfig()
+        super().__init__(config)
         self.db_manager = DatabaseManager()
-        self.crawler = None
+        self.max_requests_per_browser = 200  # Override for HTMLCrawler
         
     async def _get_crawler(self):
-        """Lazy initialization của crawler"""
-        if not self.crawler:
-            self.crawler = AsyncWebCrawler()
-        return self.crawler
+        """Get Crawl4AI crawler using base class method"""
+        return await self._get_crawl4ai_crawler()
     
     async def crawl_html(self, url: str, company_name: str, url_type: str = 'website') -> bool:
         """Crawl HTML content và lưu vào database (contact_html_storage)"""
@@ -242,14 +241,3 @@ class HTMLCrawler:
             logger.error(f"Failed to crawl Facebook page for {company_name}: {url} - {e}")
             return False
     
-    def cleanup(self):
-        """Cleanup crawler resources"""
-        if self.crawler:
-            try:
-                # Note: AsyncWebCrawler.close() is async, but this method is sync
-                # In real implementation, you'd need to handle this properly
-                pass
-            except Exception as e:
-                logger.error(f"Error cleaning up HTML crawler: {e}")
-            finally:
-                self.crawler = None

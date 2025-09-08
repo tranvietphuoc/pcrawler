@@ -97,7 +97,7 @@ async def run(
             failed_industries.append((ind_id, ind_name))
             continue
         logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
-        # Chuẩn hoá dữ liệu company và tích luỹ
+        # Chuẩn hoá dữ liệu company và submit tasks ngay
         normalized: List[Dict[str, Any]] = []
         for item in links:
             if isinstance(item, str):
@@ -112,6 +112,15 @@ async def run(
                 normalized.append(item)
         all_company_links.extend(normalized)
         industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
+        
+        # Submit detail batches ngay sau khi fetch xong industry này
+        for i in range(0, len(normalized), batch_size):
+            batch = normalized[i:i+batch_size]
+            t = task_crawl_detail_pages.delay(batch, batch_size)
+            detail_tasks.append(t)
+        
+        # Delay giữa các industry để tránh overload
+        await asyncio.sleep(2)
 
     # PHASE 0 - PASS 2: Retry failed industries
     if failed_industries:
@@ -136,21 +145,85 @@ async def run(
                     normalized.append(item)
             all_company_links.extend(normalized)
             industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
+            
+            # Submit detail batches ngay cho pass 2
+            for i in range(0, len(normalized), batch_size):
+                batch = normalized[i:i+batch_size]
+                t = task_crawl_detail_pages.delay(batch, batch_size)
+                detail_tasks.append(t)
+            
+            # Delay giữa các industry retry
+            await asyncio.sleep(2)
 
     # Báo cáo industry nào còn 0 link sau 2 pass (để đảm bảo không sót)
     zero_link_industries = [name for name in [n for _, n in industries] if industry_link_counts.get(name, 0) == 0]
     if zero_link_industries:
         logger.warning(f"Industries with 0 links after 2 passes: {len(zero_link_industries)} -> {zero_link_industries}")
+        
+        # PHASE 0 - PASS 3: Final attempt for zero-link industries with aggressive settings
+        logger.info(f"PHASE 0 - PASS 3: Final attempt for {len(zero_link_industries)} zero-link industries...")
+        for ind_id, ind_name in [(id, name) for id, name in industries if name in zero_link_industries]:
+            logger.info(f"[Final Attempt] Trying industry '{ind_name}' with aggressive settings...")
+            
+            # Aggressive retry settings for final attempt
+            retries, timeout_s, delay_s = 5, 600, 10  # 10 minutes timeout, 5 retries, 10s delay
+            links_local = []
+            
+            for attempt in range(retries + 1):
+                try:
+                    logger.info(f"[Final Attempt] {ind_name} - Attempt {attempt+1}/{retries+1} (timeout={timeout_s}s)")
+                    links_local = await asyncio.wait_for(
+                        list_c.get_company_links_for_industry(base_url, ind_id, ind_name),
+                        timeout=timeout_s,
+                    )
+                    logger.info(f"[Final Attempt] {ind_name} - Success -> {len(links_local)} links")
+                    if links_local:
+                        break
+                except asyncio.TimeoutError:
+                    logger.warning(f"[Final Attempt] {ind_name} - Timeout on attempt {attempt+1}/{retries+1}")
+                except Exception as e:
+                    logger.warning(f"[Final Attempt] {ind_name} - Error on attempt {attempt+1}/{retries+1}: {e}")
+                await asyncio.sleep(delay_s)
+            
+            if links_local:
+                logger.info(f"[Final Attempt] {ind_name} - SUCCESS! Got {len(links_local)} links")
+                # Process and submit links
+                normalized = []
+                for item in links_local:
+                    if isinstance(item, str):
+                        normalized.append({
+                            'name': '',
+                            'url': item,
+                            'industry': ind_name,
+                        })
+                    elif isinstance(item, dict):
+                        item = {**item}
+                        item['industry'] = ind_name
+                        normalized.append(item)
+                
+                all_company_links.extend(normalized)
+                industry_link_counts[ind_name] = len(normalized)
+                
+                # Submit detail batches
+                for i in range(0, len(normalized), batch_size):
+                    batch = normalized[i:i+batch_size]
+                    t = task_crawl_detail_pages.delay(batch, batch_size)
+                    detail_tasks.append(t)
+                
+                await asyncio.sleep(5)  # Longer delay for final attempt
+            else:
+                logger.error(f"[Final Attempt] {ind_name} - FAILED after {retries+1} attempts, giving up")
+        
+        # Final report
+        final_zero_industries = [name for name in [n for _, n in industries] if industry_link_counts.get(name, 0) == 0]
+        if final_zero_industries:
+            logger.error(f"FINAL RESULT: {len(final_zero_industries)} industries still have 0 links: {final_zero_industries}")
+        else:
+            logger.info("FINAL RESULT: All industries now have links!")
 
-    # PHASE 1: Sau khi đã gom đủ links của tất cả industries, mới submit crawl detail
+    # PHASE 1: Tổng kết và chờ tất cả detail batches (đã submit dần trong lúc fetch)
     total_companies = len(all_company_links)
     logger.info(f"Total unique company links collected: {total_companies}")
-    
-    # Submit detail batches
-    for i in range(0, total_companies, batch_size):
-        batch = all_company_links[i:i+batch_size]
-        t = task_crawl_detail_pages.delay(batch, batch_size)
-        detail_tasks.append(t)
     logger.info(f"Submitted {len(detail_tasks)} detail batches. Waiting for completion...")
 
     for t in detail_tasks:
@@ -192,6 +265,12 @@ async def run(
     except Exception as e:
         logger.error(f"Failed exporting final CSV: {e}")
         return {"status": "error", "message": str(e)}
+
+    # Cleanup ListCrawler resources
+    try:
+        await list_c.cleanup()
+    except Exception as e:
+        logger.warning(f"Error cleaning up ListCrawler: {e}")
 
     return {
         "status": "success",

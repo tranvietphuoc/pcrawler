@@ -2,6 +2,7 @@ import re, asyncio, random, logging
 from typing import List, Tuple
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
+from .base_crawler import BaseCrawler
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -9,25 +10,16 @@ logging.basicConfig(
 )
 
 
-class ListCrawler:
+class ListCrawler(BaseCrawler):
     def __init__(self, config: CrawlerConfig = None, max_retries: int = None, delay_range=None):
-        self.config = config or CrawlerConfig()
+        super().__init__(config)
         self.max_retries = max_retries or self.config.processing_config["max_retries"]
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
+        self.max_requests_per_browser = 500  # Override for ListCrawler
 
     async def _open_context(self):
-        p = await async_playwright().start()
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        )
-        context = await browser.new_context()
-        page = await context.new_page()
-        return p, browser, context, page
+        """Open Playwright context using base class method"""
+        return await self._open_playwright_context()
 
     async def get_total_pages(self, page, url: str) -> int:
         for i in range(self.max_retries):
@@ -382,7 +374,7 @@ class ListCrawler:
             try:
                 await page.close()
                 await context.close()
-                await browser.close()
+                # Don't close browser here as it's managed by the class
                 await p.stop()
             except Exception as e:
                 print(f"[WARNING] Error closing browser: {e}")
@@ -401,3 +393,4 @@ class ListCrawler:
                 print(f"[ERROR] Failed to crawl page {page_url}: {e}")
                 continue
         return uniq
+    
