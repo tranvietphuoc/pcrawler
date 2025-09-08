@@ -58,6 +58,7 @@ async def run(
     # PHASE 1: Crawl detail pages -> DB
     detail_tasks = []
     total_companies = 0
+    all_company_links: List[Dict[str, Any]] = []
     async def fetch_links_with_retry(ind_id: str, ind_name: str, pass_no: int = 1) -> List[str]:
         # Adaptive retries/timeouts per pass
         if pass_no == 1:
@@ -82,37 +83,41 @@ async def run(
 
     failed_industries: List[tuple] = []
 
-    for idx, (ind_id, ind_name) in enumerate(industries, start=1):
-        links = await fetch_links_with_retry(ind_id, ind_name, pass_no=1)
-        if not links:
-            logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
-            failed_industries.append((ind_id, ind_name))
-            continue
-        logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
-        total_companies += len(links)
-        # Chuẩn hoá dữ liệu company
-        normalized = []
-        for item in links:
-            if isinstance(item, str):
-                normalized.append({
-                    'name': '',
-                    'url': item,
-                })
-            elif isinstance(item, dict):
-                item = {**item}
-                normalized.append(item)
-        for i in range(0, len(normalized), batch_size):
-            batch = normalized[i:i+batch_size]
-            t = task_crawl_detail_pages.delay(batch, batch_size)
-            detail_tasks.append(t)
-    logger.info(f"Submitted {len(detail_tasks)} detail batches")
+    # Giới hạn số industry fetch đồng thời để giảm lỗi (timeout/ERR_ABORTED)
+    industry_fetch_concurrency = config.processing_config.get('industry_fetch_concurrency', 2)
+    sem = asyncio.Semaphore(industry_fetch_concurrency)
 
-    # Wait detail tasks
-    for t in detail_tasks:
-        try:
-            t.get(timeout=3600)
-        except Exception as e:
-            logger.warning(f"Detail batch failed: {e}")
+    async def process_industry(idx: int, total: int, ind_id: str, ind_name: str):
+        async with sem:
+            links = await fetch_links_with_retry(ind_id, ind_name, pass_no=1)
+            if not links:
+                logger.error(f"[{idx}/{total}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
+                failed_industries.append((ind_id, ind_name))
+                return
+            logger.info(f"[{idx}/{total}] Industry '{ind_name}' -> {len(links)} companies")
+            # Chuẩn hoá dữ liệu company và phân phối batch ngay để chạy song song
+            normalized: List[Dict[str, Any]] = []
+            for item in links:
+                if isinstance(item, str):
+                    normalized.append({
+                        'name': '',
+                        'url': item,
+                        'industry': ind_name,
+                    })
+                elif isinstance(item, dict):
+                    item = {**item}
+                    item['industry'] = ind_name
+                    normalized.append(item)
+            all_company_links.extend(normalized)
+            for i in range(0, len(normalized), batch_size):
+                batch = normalized[i:i+batch_size]
+                t = task_crawl_detail_pages.delay(batch, batch_size)
+                detail_tasks.append(t)
+
+    await asyncio.gather(*[
+        process_industry(idx, len(industries), ind_id, ind_name)
+        for idx, (ind_id, ind_name) in enumerate(industries, start=1)
+    ])
 
     # Second pass for industries that failed to fetch links
     if failed_industries:
@@ -123,23 +128,35 @@ async def run(
                 logger.error(f"[Retry] Industry '{ind_name}' -> still FAILED to fetch links, skipping")
                 continue
             logger.info(f"[Retry] Industry '{ind_name}' -> {len(links)} companies")
-            normalized = []
+            normalized: List[Dict[str, Any]] = []
             for item in links:
                 if isinstance(item, str):
                     normalized.append({
                         'name': '',
                         'url': item,
+                        'industry': ind_name,
                     })
                 elif isinstance(item, dict):
-                    item = {item: item for item in item} if isinstance(item, dict) else item
+                    item = {**item}
+                    item['industry'] = ind_name
                     normalized.append(item)
+            all_company_links.extend(normalized)
+            # Phân phối batch ngay cho pass 2
             for i in range(0, len(normalized), batch_size):
                 batch = normalized[i:i+batch_size]
                 t = task_crawl_detail_pages.delay(batch, batch_size)
-                try:
-                    t.get(timeout=3600)
-                except Exception as e:
-                    logger.warning(f"Detail batch (retry) failed for '{ind_name}': {e}")
+                detail_tasks.append(t)
+
+    # Tổng kết và chờ tất cả detail batches (đã dispatch dần trong lúc fetch)
+    total_companies = len(all_company_links)
+    logger.info(f"Total unique company links collected: {total_companies}")
+    logger.info(f"Submitted {len(detail_tasks)} detail batches. Waiting for completion...")
+
+    for t in detail_tasks:
+        try:
+            t.get(timeout=3600)
+        except Exception as e:
+            logger.warning(f"Detail batch failed: {e}")
 
     # PHASE 2: Extract company details from DB
     logger.info("Extracting company details from stored HTML...")
