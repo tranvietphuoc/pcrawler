@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS company_details (
     tiktok TEXT,
     youtube TEXT,
     instagram TEXT,
-    description TEXT,
     created_year TEXT,
     revenue TEXT,
     scale TEXT,
@@ -61,28 +60,7 @@ CREATE TABLE IF NOT EXISTS email_extraction (
     FOREIGN KEY (contact_html_id) REFERENCES contact_html_storage (id)
 );
 
--- Bảng final result kết hợp tất cả thông tin
-CREATE TABLE IF NOT EXISTS final_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    company_name TEXT NOT NULL,
-    company_url TEXT,
-    address TEXT,
-    phone TEXT,
-    website TEXT,
-    facebook TEXT,
-    linkedin TEXT,
-    tiktok TEXT,
-    youtube TEXT,
-    instagram TEXT,
-    industry TEXT,
-    description TEXT,
-    created_year TEXT,
-    revenue TEXT,
-    scale TEXT,
-    extracted_emails TEXT, -- Single email per row
-    email_source TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- (final_results removed; phase 5 sẽ join bằng DataFrame thay vì ghi bảng)
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_detail_html_status ON detail_html_storage(status);
@@ -93,4 +71,4 @@ CREATE INDEX IF NOT EXISTS idx_contact_html_company ON contact_html_storage(comp
 CREATE INDEX IF NOT EXISTS idx_contact_html_type ON contact_html_storage(url_type);
 CREATE INDEX IF NOT EXISTS idx_email_extraction_company ON email_extraction(company_name);
 CREATE INDEX IF NOT EXISTS idx_email_extraction_html_id ON email_extraction(contact_html_id);
-CREATE INDEX IF NOT EXISTS idx_final_results_company ON final_results(company_name);
+-- (index final_results removed)

@@ -1,4 +1,5 @@
 import asyncio
+import pandas as pd
 from celery import Celery
 from app.crawler.html_crawler import HTMLCrawler
 from app.crawler.detail_db_crawler import DetailDBCrawler
@@ -279,6 +280,84 @@ def get_database_stats():
         
     except Exception as e:
         logger.error(f"Failed to get database stats: {e}")
+        return {
+            'status': 'failed',
+            'message': str(e)
+        }
+
+
+@celery_app.task(name="final.export", bind=True)
+def export_final_csv(self):
+    """
+    Phase 5: Join các bảng và xuất CSV cuối cùng theo cột yêu cầu
+    Columns: industry, company_name, company_url, address, phone, website, facebook,
+             linkedin, tiktok, youtube, instagram, created_year, revenue, scale,
+             extracted_email, email_source, confidence_score
+    """
+    try:
+        config = CrawlerConfig()
+        output_path = config.output_config.get("final_output", "data/final.csv")
+        db = DatabaseManager()
+        with db.get_connection() as conn:
+            query = """
+                SELECT 
+                    d.industry AS industry,
+                    cd.company_name,
+                    cd.company_url,
+                    cd.address,
+                    cd.phone,
+                    cd.website,
+                    cd.facebook,
+                    cd.linkedin,
+                    cd.tiktok,
+                    cd.youtube,
+                    cd.instagram,
+                    cd.created_year,
+                    cd.revenue,
+                    cd.scale,
+                    COALESCE(e.extracted_emails, '[]') AS extracted_email,
+                    e.email_source,
+                    e.confidence_score
+                FROM company_details cd
+                JOIN detail_html_storage d ON cd.detail_html_id = d.id
+                LEFT JOIN email_extraction e ON e.company_name = cd.company_name
+                ORDER BY cd.company_name
+            """
+            df = pd.read_sql_query(query, conn)
+            # explode emails if JSON array to one row per email
+            def split_emails(val):
+                try:
+                    lst = pd.json.loads(val) if isinstance(val, str) and val.startswith('[') else None
+                except Exception:
+                    lst = None
+                if lst is None:
+                    return [val] if val and val != '[]' else []
+                return lst
+            # Prepare rows
+            rows = []
+            for _, r in df.iterrows():
+                emails = split_emails(r['extracted_email'])
+                if not emails:
+                    rows.append({**r.to_dict(), 'extracted_email': 'N/A'})
+                else:
+                    for em in emails[:5]:
+                        rows.append({**r.to_dict(), 'extracted_email': em})
+            out_df = pd.DataFrame(rows)
+            # Ensure columns order
+            cols = [
+                'industry','company_name','company_url','address','phone','website','facebook',
+                'linkedin','tiktok','youtube','instagram','created_year','revenue','scale',
+                'extracted_email','email_source','confidence_score'
+            ]
+            out_df = out_df.reindex(columns=cols)
+            out_df.to_csv(output_path, index=False)
+        return {
+            'status': 'completed',
+            'rows': len(out_df),
+            'output': output_path
+        }
+    except Exception as e:
+        logger.error(f"Final export failed: {e}")
         return {
             'status': 'failed',
             'message': str(e)

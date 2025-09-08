@@ -28,7 +28,7 @@ celery_app.conf.task_routes = {
     # Phase 4
     "email.extract_from_contact": {"queue": "crawl"},
     # Phase 5
-    "db.create_final_results": {"queue": "crawl"},
+    "final.export": {"queue": "crawl"},
     # Stats
     "db.get_stats": {"queue": "crawl"},
 }

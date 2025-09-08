@@ -195,41 +195,7 @@ class DatabaseManager:
             
             return results
     
-    def create_final_results(self):
-        """Create final results by combining all tables"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Clear existing final results
-            cursor.execute("DELETE FROM final_results")
-            
-            # Insert combined results
-            cursor.execute("""
-                INSERT INTO final_results 
-                (company_name, company_url, address, phone, website, facebook, industry, description, extracted_emails, email_source)
-                SELECT 
-                    cd.company_name,
-                    cd.company_url,
-                    cd.address,
-                    cd.phone,
-                    cd.website,
-                    cd.facebook,
-                    cd.industry,
-                    cd.description,
-                    COALESCE(e.extracted_emails, '[]') as extracted_emails,
-                    e.email_source
-                FROM company_details cd
-                LEFT JOIN email_extraction e ON cd.company_name = e.company_name
-                ORDER BY cd.company_name
-            """)
-            
-            conn.commit()
-            
-            # Get count
-            cursor.execute("SELECT COUNT(*) FROM final_results")
-            count = cursor.fetchone()[0]
-            
-            return count
+    # create_final_results removed; final export is done via pandas in task final.export
     
     def get_stats(self) -> Dict[str, Any]:
         """Get database statistics"""
@@ -267,10 +233,6 @@ class DatabaseManager:
             cursor.execute("SELECT COUNT(*) FROM email_extraction WHERE extracted_emails != '[]'")
             successful_extractions = cursor.fetchone()[0]
             
-            # Final results stats
-            cursor.execute("SELECT COUNT(*) FROM final_results")
-            total_final_results = cursor.fetchone()[0]
-            
             return {
                 'total_detail_html_records': total_detail_html,
                 'pending_detail_html_records': pending_detail_html,
@@ -281,8 +243,7 @@ class DatabaseManager:
                 'total_company_details': total_company_details,
                 'total_extractions': total_extractions,
                 'successful_extractions': successful_extractions,
-                'extraction_success_rate': successful_extractions / max(total_extractions, 1),
-                'total_final_results': total_final_results
+                'extraction_success_rate': successful_extractions / max(total_extractions, 1)
             }
     
     def get_pending_detail_html(self, limit: int = 50) -> List[Dict[str, Any]]:

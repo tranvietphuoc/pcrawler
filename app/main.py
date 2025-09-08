@@ -9,7 +9,7 @@ from app.tasks.html_tasks import (
     extract_company_details as task_extract_company_details,
     crawl_contact_pages_from_details as task_crawl_contact_from_details,
     extract_emails_from_contact as task_extract_emails_from_contact,
-    create_final_results as task_create_final_results,
+    export_final_csv as task_export_final_csv,
 )
 from config import CrawlerConfig
 import sys
@@ -110,21 +110,21 @@ async def run(
     except Exception as e:
         logger.warning(f"Email extraction encountered issues: {e}")
 
-    # PHASE 5: Build final_results
-    logger.info("Creating final_results table...")
+    # PHASE 5: Export final CSV (join via DataFrame)
+    logger.info("Exporting final CSV (joining phases 1-2-4)...")
     try:
-        r = task_create_final_results.delay()
-        res = r.get(timeout=600)
-        logger.info(f"Final results created: {res.get('count', 0)} rows")
+        r = task_export_final_csv.delay()
+        res = r.get(timeout=1800)
+        logger.info(f"Final export completed: {res.get('rows', 0)} rows -> {res.get('output')}")
     except Exception as e:
-        logger.error(f"Failed creating final results: {e}")
+        logger.error(f"Failed exporting final CSV: {e}")
         return {"status": "error", "message": str(e)}
 
     return {
         "status": "success",
         "total_industries": len(industries),
         "total_companies": total_companies,
-        "final_table": "final_results",
+        "final_output": res.get('output'),
     }
 
 
