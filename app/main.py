@@ -88,46 +88,34 @@ async def run(
     failed_industries: List[tuple] = []
     industry_link_counts: Dict[str, int] = {}
 
-    # Giới hạn số industry fetch đồng thời để giảm lỗi (timeout/ERR_ABORTED)
-    industry_fetch_concurrency = config.processing_config.get('industry_fetch_concurrency', 2)
-    sem = asyncio.Semaphore(industry_fetch_concurrency)
+    # PHASE 0 - PASS 1: Fetch all company links for all industries (sequential)
+    logger.info("PHASE 0 - PASS 1: Fetching all company links...")
+    for idx, (ind_id, ind_name) in enumerate(industries, start=1):
+        links = await fetch_links_with_retry(ind_id, ind_name, pass_no=1)
+        if not links:
+            logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
+            failed_industries.append((ind_id, ind_name))
+            continue
+        logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
+        # Chuẩn hoá dữ liệu company và tích luỹ
+        normalized: List[Dict[str, Any]] = []
+        for item in links:
+            if isinstance(item, str):
+                normalized.append({
+                    'name': '',
+                    'url': item,
+                    'industry': ind_name,
+                })
+            elif isinstance(item, dict):
+                item = {**item}
+                item['industry'] = ind_name
+                normalized.append(item)
+        all_company_links.extend(normalized)
+        industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
 
-    async def process_industry(idx: int, total: int, ind_id: str, ind_name: str):
-        async with sem:
-            links = await fetch_links_with_retry(ind_id, ind_name, pass_no=1)
-            if not links:
-                logger.error(f"[{idx}/{total}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
-                failed_industries.append((ind_id, ind_name))
-                return
-            logger.info(f"[{idx}/{total}] Industry '{ind_name}' -> {len(links)} companies")
-            # Chuẩn hoá dữ liệu company và phân phối batch ngay để chạy song song
-            normalized: List[Dict[str, Any]] = []
-            for item in links:
-                if isinstance(item, str):
-                    normalized.append({
-                        'name': '',
-                        'url': item,
-                        'industry': ind_name,
-                    })
-                elif isinstance(item, dict):
-                    item = {**item}
-                    item['industry'] = ind_name
-                    normalized.append(item)
-            all_company_links.extend(normalized)
-            industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
-            for i in range(0, len(normalized), batch_size):
-                batch = normalized[i:i+batch_size]
-                t = task_crawl_detail_pages.delay(batch, batch_size)
-                detail_tasks.append(t)
-
-    await asyncio.gather(*[
-        process_industry(idx, len(industries), ind_id, ind_name)
-        for idx, (ind_id, ind_name) in enumerate(industries, start=1)
-    ])
-
-    # Second pass for industries that failed to fetch links
+    # PHASE 0 - PASS 2: Retry failed industries
     if failed_industries:
-        logger.info(f"Retrying {len(failed_industries)} industries in second pass...")
+        logger.info(f"PHASE 0 - PASS 2: Retrying {len(failed_industries)} industries...")
         for ind_id, ind_name in failed_industries:
             links = await fetch_links_with_retry(ind_id, ind_name, pass_no=2)
             if not links:
@@ -148,20 +136,21 @@ async def run(
                     normalized.append(item)
             all_company_links.extend(normalized)
             industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
-            # Phân phối batch ngay cho pass 2
-            for i in range(0, len(normalized), batch_size):
-                batch = normalized[i:i+batch_size]
-                t = task_crawl_detail_pages.delay(batch, batch_size)
-                detail_tasks.append(t)
 
     # Báo cáo industry nào còn 0 link sau 2 pass (để đảm bảo không sót)
     zero_link_industries = [name for name in [n for _, n in industries] if industry_link_counts.get(name, 0) == 0]
     if zero_link_industries:
         logger.warning(f"Industries with 0 links after 2 passes: {len(zero_link_industries)} -> {zero_link_industries}")
 
-    # Tổng kết và chờ tất cả detail batches (đã dispatch dần trong lúc fetch)
+    # PHASE 1: Sau khi đã gom đủ links của tất cả industries, mới submit crawl detail
     total_companies = len(all_company_links)
     logger.info(f"Total unique company links collected: {total_companies}")
+    
+    # Submit detail batches
+    for i in range(0, total_companies, batch_size):
+        batch = all_company_links[i:i+batch_size]
+        t = task_crawl_detail_pages.delay(batch, batch_size)
+        detail_tasks.append(t)
     logger.info(f"Submitted {len(detail_tasks)} detail batches. Waiting for completion...")
 
     for t in detail_tasks:
