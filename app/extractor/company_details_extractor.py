@@ -46,7 +46,7 @@ class CompanyDetailsExtractor:
                 xpath_config.get('social_media_container', '').replace('{platform}', 'instagram.com')
             ],
             'industry': [
-                xpath_config.get('company_business', '')
+                xpath_config.get('company_industry', '')
             ],
             'created_year': [
                 xpath_config.get('company_created_year', '')
@@ -57,9 +57,6 @@ class CompanyDetailsExtractor:
             'scale': [
                 xpath_config.get('company_scale', '')
             ],
-            'description': [
-                # Không có XPath cũ cho description, để trống
-            ]
         }
         
         # Remove empty patterns
@@ -108,6 +105,7 @@ class CompanyDetailsExtractor:
         details = {
             'company_name': company_name,
             'company_url': company_url,
+            'industry': None,
             'address': None,
             'phone': None,
             'website': None,
@@ -117,7 +115,6 @@ class CompanyDetailsExtractor:
             'youtube': None,
             'instagram': None,
             'industry': None,
-            'description': None,
             'created_year': None,
             'revenue': None,
             'scale': None
@@ -168,7 +165,11 @@ class CompanyDetailsExtractor:
                     record['company_url']
                 )
                 
-                # Store company details
+                # Backup industry vào detail_html_storage nếu thiếu
+                if details.get('industry'):
+                    self.db_manager.update_detail_industry(record['id'], details['industry'])
+
+                # Store company details (không lưu industry, industry nằm ở detail_html_storage)
                 self.db_manager.store_company_details(
                     detail_html_id=record['id'],
                     company_name=details['company_name'],
@@ -181,8 +182,6 @@ class CompanyDetailsExtractor:
                     tiktok=details['tiktok'],
                     youtube=details['youtube'],
                     instagram=details['instagram'],
-                    industry=details['industry'],
-                    description=details['description'],
                     created_year=details['created_year'],
                     revenue=details['revenue'],
                     scale=details['scale']

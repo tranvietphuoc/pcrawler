@@ -40,14 +40,14 @@ class DatabaseManager:
         
         logger.info(f"Database initialized: {self.db_path}")
     
-    def store_detail_html(self, company_name: str, company_url: str, html_content: str) -> int:
+    def store_detail_html(self, company_name: str, company_url: str, html_content: str, industry_name: str = None) -> int:
         """Store detail page HTML content and return record ID"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO detail_html_storage (company_name, company_url, html_content, status)
-                VALUES (?, ?, ?, 'pending')
-            """, (company_name, company_url, html_content))
+                INSERT INTO detail_html_storage (company_name, company_url, industry_name, html_content, status)
+                VALUES (?, ?, ?, ?, 'pending')
+            """, (company_name, company_url, industry_name, html_content))
             record_id = cursor.lastrowid
             conn.commit()
             return record_id
@@ -117,7 +117,7 @@ class DatabaseManager:
     def store_company_details(self, detail_html_id: int, company_name: str, company_url: str,
                             address: str = None, phone: str = None, website: str = None,
                             facebook: str = None, linkedin: str = None, tiktok: str = None,
-                            youtube: str = None, instagram: str = None, industry: str = None, 
+                            youtube: str = None, instagram: str = None,
                             description: str = None, created_year: str = None, revenue: str = None, 
                             scale: str = None):
         """Store company details extracted from detail page"""
@@ -126,10 +126,26 @@ class DatabaseManager:
             cursor.execute("""
                 INSERT INTO company_details 
                 (detail_html_id, company_name, company_url, address, phone, website, facebook, 
-                 linkedin, tiktok, youtube, instagram, industry, description, created_year, revenue, scale)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (detail_html_id, company_name, company_url, address, phone, website, facebook, 
-                  linkedin, tiktok, youtube, instagram, industry, description, created_year, revenue, scale))
+                  linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale))
+            conn.commit()
+
+    def update_detail_industry(self, detail_html_id: int, industry: str):
+        """Update industry in detail_html_storage if missing."""
+        if not industry:
+            return
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE detail_html_storage
+                SET industry = COALESCE(NULLIF(industry, ''), ?)
+                WHERE id = ?
+                """,
+                (industry, detail_html_id),
+            )
             conn.commit()
     
     def store_email_extraction(self, contact_html_id: int, company_name: str, 

@@ -62,8 +62,19 @@ async def run(
         links = await list_c.get_company_links_for_industry(base_url, ind_id, ind_name)
         logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
         total_companies += len(links)
-        for i in range(0, len(links), batch_size):
-            batch = links[i:i+batch_size]
+        # Chuẩn hoá dữ liệu company
+        normalized = []
+        for item in links:
+            if isinstance(item, str):
+                normalized.append({
+                    'name': '',
+                    'url': item,
+                })
+            elif isinstance(item, dict):
+                item = {**item}
+                normalized.append(item)
+        for i in range(0, len(normalized), batch_size):
+            batch = normalized[i:i+batch_size]
             t = task_crawl_detail_pages.delay(batch, batch_size)
             detail_tasks.append(t)
     logger.info(f"Submitted {len(detail_tasks)} detail batches")

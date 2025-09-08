@@ -20,7 +20,7 @@ xpath:
   company_phone: "//div[@class='box-caption']/p//a[starts-with(@href,'tel:')]"
   company_scale: "//div[contains(@class,'company-subdetail')]//div[contains(@class,'company-subdetail-info')][2]//span[2]"
   company_created_year: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Thành lập')]]/span"
-  company_business: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Ngành')]]/a"
+  company_industry: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Ngành')]]/a"
   company_revenue: "//ul[contains(@class,'company-details')]//li[label[contains(text(),'Doanh thu')]]/span"
   
   # Social media

@@ -20,7 +20,7 @@ class DetailDBCrawler:
             self.crawler = AsyncWebCrawler()
         return self.crawler
     
-    async def crawl_detail_page(self, company_url: str, company_name: str) -> bool:
+    async def crawl_detail_page(self, company_url: str, company_name: str, industry: str = None) -> bool:
         """Crawl detail page và lưu HTML vào database"""
         if not company_url or company_url in ("N/A", ""):
             return False
@@ -37,7 +37,7 @@ class DetailDBCrawler:
             
             if html_content and len(html_content) > 100:  # Valid HTML content
                 # Store to database
-                record_id = self.db_manager.store_detail_html(company_name, company_url, html_content)
+                record_id = self.db_manager.store_detail_html(company_name, company_url, html_content, industry)
                 logger.info(f"Stored detail HTML for {company_name}: {company_url} (ID: {record_id})")
                 return True
             else:
@@ -58,11 +58,22 @@ class DetailDBCrawler:
         }
         
         for company in companies:
-            company_name = company.get('name', '')
-            company_url = company.get('url', '')
+            # Support both dict and plain URL string
+            if isinstance(company, str):
+                company_url = company
+                company_name = ''
+                industry = None
+            elif isinstance(company, dict):
+                company_name = company.get('name', '')
+                company_url = company.get('url', '')
+                industry = company.get('industry')
+            else:
+                company_name = ''
+                company_url = ''
+                industry = None
             
             if company_url:
-                success = await self.crawl_detail_page(company_url, company_name)
+                success = await self.crawl_detail_page(company_url, company_name, industry)
                 if success:
                     results['successful'] += 1
                 else:

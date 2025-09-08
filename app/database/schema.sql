@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS detail_html_storage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_name TEXT NOT NULL,
     company_url TEXT NOT NULL,
+    industry TEXT,
     html_content TEXT NOT NULL,
     crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status TEXT DEFAULT 'pending', -- pending, processed, failed
@@ -26,7 +27,6 @@ CREATE TABLE IF NOT EXISTS company_details (
     tiktok TEXT,
     youtube TEXT,
     instagram TEXT,
-    industry TEXT,
     description TEXT,
     created_year TEXT,
     revenue TEXT,
