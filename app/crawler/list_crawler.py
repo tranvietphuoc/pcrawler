@@ -15,7 +15,7 @@ class ListCrawler(BaseCrawler):
         super().__init__(config)
         self.max_retries = max_retries or self.config.processing_config["max_retries"]
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
-        self.max_requests_per_browser = 500  # Override for ListCrawler
+        self.max_requests_per_browser = 50  # Override for ListCrawler - restart more frequently
 
     async def _open_context(self):
         """Open Playwright context using base class method"""

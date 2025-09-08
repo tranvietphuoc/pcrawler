@@ -91,6 +91,10 @@ async def run(
     # PHASE 0 - PASS 1: Fetch all company links for all industries (sequential)
     logger.info("PHASE 0 - PASS 1: Fetching all company links...")
     for idx, (ind_id, ind_name) in enumerate(industries, start=1):
+        # Create fresh browser for each industry to prevent 100% browser context errors
+        logger.info(f"[{idx}/{len(industries)}] Creating fresh browser for industry '{ind_name}'")
+        await list_c.create_fresh_browser_for_industry()
+        
         links = await fetch_links_with_retry(ind_id, ind_name, pass_no=1)
         if not links:
             logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
@@ -126,6 +130,10 @@ async def run(
     if failed_industries:
         logger.info(f"PHASE 0 - PASS 2: Retrying {len(failed_industries)} industries...")
         for ind_id, ind_name in failed_industries:
+            # Create fresh browser for each retry industry
+            logger.info(f"[Retry] Creating fresh browser for industry '{ind_name}'")
+            await list_c.create_fresh_browser_for_industry()
+            
             links = await fetch_links_with_retry(ind_id, ind_name, pass_no=2)
             if not links:
                 logger.error(f"[Retry] Industry '{ind_name}' -> still FAILED to fetch links, skipping")
@@ -164,6 +172,10 @@ async def run(
         logger.info(f"PHASE 0 - PASS 3: Final attempt for {len(zero_link_industries)} zero-link industries...")
         for ind_id, ind_name in [(id, name) for id, name in industries if name in zero_link_industries]:
             logger.info(f"[Final Attempt] Trying industry '{ind_name}' with aggressive settings...")
+            
+            # Create fresh browser for final attempt
+            logger.info(f"[Final Attempt] Creating fresh browser for industry '{ind_name}'")
+            await list_c.create_fresh_browser_for_industry()
             
             # Aggressive retry settings for final attempt
             retries, timeout_s, delay_s = 5, 600, 10  # 10 minutes timeout, 5 retries, 10s delay

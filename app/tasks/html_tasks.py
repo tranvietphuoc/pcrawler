@@ -28,6 +28,8 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
         asyncio.set_event_loop(loop)
         
         try:
+            # Create fresh browser for this task to prevent context errors
+            loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
             total_companies = len(companies)
             processed = 0
             successful = 0
@@ -99,6 +101,8 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
         asyncio.set_event_loop(loop)
         
         try:
+            # Create fresh browser for this task to prevent context errors
+            loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
             # Get company details từ DB
             company_details = db_manager.get_company_details_for_contact_crawl(batch_size)
             

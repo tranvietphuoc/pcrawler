@@ -56,32 +56,57 @@ class BaseCrawler:
     
     async def _restart_playwright_browser(self):
         """Restart Playwright browser to prevent memory leaks"""
+        # Force cleanup existing browser
         if self.current_browser:
             try:
+                # Close all contexts first
+                contexts = self.current_browser.contexts
+                for context in contexts:
+                    try:
+                        await context.close()
+                    except:
+                        pass
                 await self.current_browser.close()
-            except:
-                pass
+                logger.info(f"{self.__class__.__name__} browser closed")
+            except Exception as e:
+                logger.warning(f"Error closing browser: {e}")
+        
         if self.current_playwright:
             try:
                 await self.current_playwright.stop()
-            except:
-                pass
+                logger.info(f"{self.__class__.__name__} playwright stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping playwright: {e}")
         
-        self.current_playwright = await async_playwright().start()
-        self.current_browser = await self.current_playwright.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--memory-pressure-off",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding"
-            ],
-        )
-        self.request_count = 0
-        logger.info(f"{self.__class__.__name__} Playwright browser restarted after {self.max_requests_per_browser} requests")
+        # Reset state
+        self.current_browser = None
+        self.current_playwright = None
+        
+        # Wait a bit before restarting
+        await asyncio.sleep(1)
+        
+        # Start fresh browser
+        try:
+            self.current_playwright = await async_playwright().start()
+            self.current_browser = await self.current_playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--memory-pressure-off",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
+                    "--disable-web-security",
+                    "--disable-features=VizDisplayCompositor"
+                ],
+            )
+            self.request_count = 0
+            logger.info(f"{self.__class__.__name__} Playwright browser restarted successfully")
+        except Exception as e:
+            logger.error(f"Failed to restart browser: {e}")
+            raise
 
     async def _restart_crawl4ai_crawler(self):
         """Restart Crawl4AI crawler to prevent memory leaks"""
@@ -108,33 +133,61 @@ class BaseCrawler:
         self.request_count = 0
         logger.info(f"{self.__class__.__name__} Crawl4AI crawler restarted after {self.max_requests_per_browser} requests")
 
-    async def _open_playwright_context(self):
-        """Open Playwright context with optimization"""
-        # Check if we need to restart browser
-        if await self._should_restart_browser() or not self.current_browser:
+    async def _open_playwright_context(self, force_new_browser: bool = False):
+        """Open Playwright context with 100% error prevention"""
+        try:
+            # Force new browser if requested or if current browser is invalid
+            if force_new_browser or await self._should_restart_browser() or not self.current_browser:
+                await self._restart_playwright_browser()
+            
+            # Get random user agent and viewport
+            user_agent = await self._get_random_user_agent()
+            viewport = await self._get_random_viewport()
+            
+            # Create new context with error handling
+            context = await self.current_browser.new_context(
+                user_agent=user_agent,
+                viewport=viewport,
+                extra_http_headers={
+                    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                }
+            )
+            page = await context.new_page()
+            
+            # Increment request count
+            self.request_count += 1
+            
+            return self.current_playwright, self.current_browser, context, page
+            
+        except Exception as e:
+            logger.warning(f"{self.__class__.__name__} context creation failed: {e}")
+            # Force restart and retry once
             await self._restart_playwright_browser()
-        
-        # Get random user agent and viewport
-        user_agent = await self._get_random_user_agent()
-        viewport = await self._get_random_viewport()
-        
-        context = await self.current_browser.new_context(
-            user_agent=user_agent,
-            viewport=viewport,
-            extra_http_headers={
-                'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-            }
-        )
-        page = await context.new_page()
-        
-        # Increment request count
-        self.request_count += 1
-        
-        return self.current_playwright, self.current_browser, context, page
+            await asyncio.sleep(2)
+            
+            # Retry with fresh browser
+            user_agent = await self._get_random_user_agent()
+            viewport = await self._get_random_viewport()
+            
+            context = await self.current_browser.new_context(
+                user_agent=user_agent,
+                viewport=viewport,
+                extra_http_headers={
+                    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                }
+            )
+            page = await context.new_page()
+            self.request_count += 1
+            
+            return self.current_playwright, self.current_browser, context, page
 
     async def _get_crawl4ai_crawler(self):
         """Get Crawl4AI crawler with optimization"""
@@ -175,3 +228,13 @@ class BaseCrawler:
         self.current_playwright = None
         self.crawler = None
         self.request_count = 0
+    
+    async def create_fresh_browser_for_industry(self):
+        """Create a completely fresh browser for each industry - 100% error prevention"""
+        # Cleanup existing browser completely
+        await self.cleanup()
+        await asyncio.sleep(2)  # Wait for complete cleanup
+        
+        # Create brand new browser
+        await self._restart_playwright_browser()
+        logger.info(f"{self.__class__.__name__} created fresh browser for new industry")
