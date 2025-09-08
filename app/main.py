@@ -60,28 +60,33 @@ async def run(
     total_companies = 0
     all_company_links: List[Dict[str, Any]] = []
     async def fetch_links_with_retry(ind_id: str, ind_name: str, pass_no: int = 1) -> List[str]:
-        # Adaptive retries/timeouts per pass
+        # Adaptive retries/timeouts per pass (tăng để giảm miss ở industry lớn)
         if pass_no == 1:
-            retries, timeout_s, delay_s = 2, 120, 2
+            retries, timeout_s, delay_s = 3, 180, 2
         else:
-            retries, timeout_s, delay_s = 3, 180, 3
+            retries, timeout_s, delay_s = 3, 300, 3
         links_local: List[str] = []
+        logger.info(f"[{ind_name}] Start fetching (pass {pass_no}) with timeout={timeout_s}s, retries={retries}")
         for attempt in range(retries + 1):
             try:
+                logger.info(f"[{ind_name}] Attempt {attempt+1}/{retries+1} (pass {pass_no})")
                 links_local = await asyncio.wait_for(
                     list_c.get_company_links_for_industry(base_url, ind_id, ind_name),
                     timeout=timeout_s,
                 )
+                logger.info(f"[{ind_name}] Success (pass {pass_no}) -> {len(links_local)} links")
                 if links_local:
                     return links_local
             except asyncio.TimeoutError:
-                logger.warning(f"[Industry {ind_name}] timeout (attempt {attempt+1}/{retries+1}, pass {pass_no})")
+                logger.warning(f"[{ind_name}] Timeout on attempt {attempt+1}/{retries+1} (pass {pass_no})")
             except Exception as e:
-                logger.warning(f"[Industry {ind_name}] error (attempt {attempt+1}/{retries+1}, pass {pass_no}): {e}")
+                logger.warning(f"[{ind_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {e}")
             await asyncio.sleep(delay_s)
+        logger.error(f"[{ind_name}] Failed after {retries+1} attempts (pass {pass_no})")
         return links_local
 
     failed_industries: List[tuple] = []
+    industry_link_counts: Dict[str, int] = {}
 
     # Giới hạn số industry fetch đồng thời để giảm lỗi (timeout/ERR_ABORTED)
     industry_fetch_concurrency = config.processing_config.get('industry_fetch_concurrency', 2)
@@ -109,6 +114,7 @@ async def run(
                     item['industry'] = ind_name
                     normalized.append(item)
             all_company_links.extend(normalized)
+            industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
             for i in range(0, len(normalized), batch_size):
                 batch = normalized[i:i+batch_size]
                 t = task_crawl_detail_pages.delay(batch, batch_size)
@@ -141,11 +147,17 @@ async def run(
                     item['industry'] = ind_name
                     normalized.append(item)
             all_company_links.extend(normalized)
+            industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
             # Phân phối batch ngay cho pass 2
             for i in range(0, len(normalized), batch_size):
                 batch = normalized[i:i+batch_size]
                 t = task_crawl_detail_pages.delay(batch, batch_size)
                 detail_tasks.append(t)
+
+    # Báo cáo industry nào còn 0 link sau 2 pass (để đảm bảo không sót)
+    zero_link_industries = [name for name in [n for _, n in industries] if industry_link_counts.get(name, 0) == 0]
+    if zero_link_industries:
+        logger.warning(f"Industries with 0 links after 2 passes: {len(zero_link_industries)} -> {zero_link_industries}")
 
     # Tổng kết và chờ tất cả detail batches (đã dispatch dần trong lúc fetch)
     total_companies = len(all_company_links)
