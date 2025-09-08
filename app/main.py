@@ -58,8 +58,36 @@ async def run(
     # PHASE 1: Crawl detail pages -> DB
     detail_tasks = []
     total_companies = 0
+    async def fetch_links_with_retry(ind_id: str, ind_name: str, pass_no: int = 1) -> List[str]:
+        # Adaptive retries/timeouts per pass
+        if pass_no == 1:
+            retries, timeout_s, delay_s = 2, 120, 2
+        else:
+            retries, timeout_s, delay_s = 3, 180, 3
+        links_local: List[str] = []
+        for attempt in range(retries + 1):
+            try:
+                links_local = await asyncio.wait_for(
+                    list_c.get_company_links_for_industry(base_url, ind_id, ind_name),
+                    timeout=timeout_s,
+                )
+                if links_local:
+                    return links_local
+            except asyncio.TimeoutError:
+                logger.warning(f"[Industry {ind_name}] timeout (attempt {attempt+1}/{retries+1}, pass {pass_no})")
+            except Exception as e:
+                logger.warning(f"[Industry {ind_name}] error (attempt {attempt+1}/{retries+1}, pass {pass_no}): {e}")
+            await asyncio.sleep(delay_s)
+        return links_local
+
+    failed_industries: List[tuple] = []
+
     for idx, (ind_id, ind_name) in enumerate(industries, start=1):
-        links = await list_c.get_company_links_for_industry(base_url, ind_id, ind_name)
+        links = await fetch_links_with_retry(ind_id, ind_name, pass_no=1)
+        if not links:
+            logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
+            failed_industries.append((ind_id, ind_name))
+            continue
         logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
         total_companies += len(links)
         # Chuẩn hoá dữ liệu company
@@ -85,6 +113,33 @@ async def run(
             t.get(timeout=3600)
         except Exception as e:
             logger.warning(f"Detail batch failed: {e}")
+
+    # Second pass for industries that failed to fetch links
+    if failed_industries:
+        logger.info(f"Retrying {len(failed_industries)} industries in second pass...")
+        for ind_id, ind_name in failed_industries:
+            links = await fetch_links_with_retry(ind_id, ind_name, pass_no=2)
+            if not links:
+                logger.error(f"[Retry] Industry '{ind_name}' -> still FAILED to fetch links, skipping")
+                continue
+            logger.info(f"[Retry] Industry '{ind_name}' -> {len(links)} companies")
+            normalized = []
+            for item in links:
+                if isinstance(item, str):
+                    normalized.append({
+                        'name': '',
+                        'url': item,
+                    })
+                elif isinstance(item, dict):
+                    item = {item: item for item in item} if isinstance(item, dict) else item
+                    normalized.append(item)
+            for i in range(0, len(normalized), batch_size):
+                batch = normalized[i:i+batch_size]
+                t = task_crawl_detail_pages.delay(batch, batch_size)
+                try:
+                    t.get(timeout=3600)
+                except Exception as e:
+                    logger.warning(f"Detail batch (retry) failed for '{ind_name}': {e}")
 
     # PHASE 2: Extract company details from DB
     logger.info("Extracting company details from stored HTML...")
