@@ -255,58 +255,7 @@ def main():
             sys.exit(1)
 
 
-async def backup_crawl_direct(file_path: str, batch_size: int):
-    """Backup crawl trực tiếp không dùng Celery"""
-    try:
-        config = CrawlerConfig()
-        backup_crawler = BackupCrawler(config)
-        
-        # Load N/A rows
-        na_rows = backup_crawler.load_merged_file(file_path)
-        
-        if na_rows.empty:
-            logger.info("No N/A emails found")
-            return
-        
-        logger.info(f"Found {len(na_rows)} N/A rows, starting deep crawl...")
-        
-        # Process theo batch
-        backup_results = []
-        total_rows = len(na_rows)
-        
-        for i in range(0, total_rows, batch_size):
-            batch = na_rows.iloc[i:i + batch_size]
-            logger.info(f"Processing batch {i//batch_size + 1}/{(total_rows + batch_size - 1)//batch_size}")
-            
-            # Process batch
-            batch_results = []
-            for _, row in batch.iterrows():
-                try:
-                    result = await backup_crawler.deep_crawl_emails(row)
-                    batch_results.append(result)
-                    
-                    if result['extracted_emails'] != 'N/A':
-                        logger.info(f"✓ Found emails for {row['name']}: {result['extracted_emails']}")
-                    else:
-                        logger.warning(f"✗ No emails found for {row['name']}")
-                        
-                except Exception as e:
-                    logger.error(f"Error processing {row['name']}: {e}")
-                    continue
-            
-            backup_results.extend(batch_results)
-        
-        # Update file (ghi đè file gốc)
-        updated_file = backup_crawler.update_merged_file(file_path, backup_results)
-        
-        # Summary
-        updated_count = len([r for r in backup_results if r['extracted_emails'] != 'N/A'])
-        logger.info(f"Deep crawl completed: {updated_count}/{total_rows} N/A rows updated")
-        logger.info(f"Updated file: {updated_file}")
-        
-    except Exception as e:
-        logger.error(f"Deep crawl failed: {e}")
-        sys.exit(1)
+# Legacy backup removed
 
 
 def main():
@@ -315,7 +264,7 @@ def main():
     # Main commands
     parser.add_argument(
         "command",
-        choices=["crawl", "backup-check", "backup-crawl", "backup-deep"],
+        choices=["crawl", "list-configs", "validate", "show-config"],
         help="Command to execute"
     )
     
@@ -347,31 +296,7 @@ def main():
         # Normal crawl (đã có logic check file merged trong run())
         asyncio.run(run(args.config))
         
-    elif args.command == "backup-check":
-        # Check và backup crawl (dùng task)
-        logger.info("Checking for merged file and starting backup crawl...")
-        result = check_and_backup_crawl(args.file)
-        print(f"Result: {result}")
-        
-    elif args.command == "backup-crawl":
-        # Backup crawl với Celery task
-        if not args.file:
-            logger.error("--file is required for backup-crawl command")
-            sys.exit(1)
-            
-        logger.info(f"Starting backup crawl for file: {args.file}")
-        task = backup_crawl_na_emails.delay(args.file, args.batch_size)
-        print(f"Backup crawl task started: {task.id}")
-        print(f"Monitor progress with: celery -A app.tasks.celery_app inspect active")
-        
-    elif args.command == "backup-deep":
-        # Deep crawl trực tiếp (không dùng Celery)
-        if not args.file:
-            logger.error("--file is required for backup-deep command")
-            sys.exit(1)
-            
-        logger.info(f"Starting deep crawl for file: {args.file}")
-        asyncio.run(backup_crawl_direct(args.file, args.batch_size))
+    # Legacy backup commands removed
 
 
 if __name__ == "__main__":

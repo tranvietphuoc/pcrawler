@@ -40,14 +40,14 @@ class DatabaseManager:
         
         logger.info(f"Database initialized: {self.db_path}")
     
-    def store_detail_html(self, company_name: str, company_url: str, html_content: str, industry_name: str = None) -> int:
+    def store_detail_html(self, company_name: str, company_url: str, html_content: str, industry: str = None) -> int:
         """Store detail page HTML content and return record ID"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO detail_html_storage (company_name, company_url, industry_name, html_content, status)
+                INSERT INTO detail_html_storage (company_name, company_url, industry, html_content, status)
                 VALUES (?, ?, ?, ?, 'pending')
-            """, (company_name, company_url, industry_name, html_content))
+            """, (company_name, company_url, industry, html_content))
             record_id = cursor.lastrowid
             conn.commit()
             return record_id
