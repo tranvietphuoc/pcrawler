@@ -26,11 +26,14 @@ class AsyncBrowserContextManager:
     async def _is_context_healthy(self, context) -> bool:
         """Check if context is still healthy and usable"""
         try:
-            # Try to create a test page to check if context is alive
-            test_page = await context.new_page()
-            await test_page.close()
-            return True
-        except Exception:
+            # Check if context is still connected without creating new page
+            if hasattr(context, '_connection') and context._connection:
+                # Try to get existing pages count as a health check
+                pages = context.pages
+                return len(pages) >= 0  # Just check if we can access pages
+            return False
+        except Exception as e:
+            logger.debug(f"Context health check failed: {e}")
             return False
 
     @asynccontextmanager
@@ -71,10 +74,17 @@ class AsyncBrowserContextManager:
                 # Track active context
                 self._active_contexts[crawler_id] = self._active_contexts.get(crawler_id, 0) + 1
                 
-                # Health check before creating page
-                if not await self._is_context_healthy(context):
-                    logger.warning(f"Context for {crawler_id} is not healthy, recreating...")
-                    await context.close()
+                # Create page with error handling
+                try:
+                    page = await context.new_page()
+                except Exception as e:
+                    logger.warning(f"Failed to create page for {crawler_id}: {e}")
+                    # Try to recreate context if page creation fails
+                    try:
+                        await context.close()
+                    except:
+                        pass
+                    
                     # Recreate context
                     context = await browser.new_context(
                         user_agent=user_agent,
@@ -87,9 +97,7 @@ class AsyncBrowserContextManager:
                             'Upgrade-Insecure-Requests': '1',
                         }
                     )
-                
-                # Create page
-                page = await context.new_page()
+                    page = await context.new_page()
                 
                 logger.debug(f"Created context for {crawler_id}, active contexts: {self._active_contexts[crawler_id]}")
                 
@@ -314,16 +322,30 @@ class AsyncBrowserContextManager:
             logger.warning(f"Error closing Crawl4AI crawler {oldest_id}: {e}")
     
     async def _restart_browser(self, crawler_id: str):
-        """Restart browser for specific crawler"""
+        """Restart browser for specific crawler with proper cleanup"""
         if crawler_id in self._browsers:
             try:
+                # Close browser and wait a bit to ensure cleanup
                 await self._browsers[crawler_id].close()
+                await asyncio.sleep(1)  # Wait for cleanup
+                
+                # Clean up all references
                 del self._browsers[crawler_id]
                 if crawler_id in self._active_contexts:
                     del self._active_contexts[crawler_id]
+                if crawler_id in self._request_counts:
+                    del self._request_counts[crawler_id]
+                    
                 logger.info(f"Restarted browser for {crawler_id}")
             except Exception as e:
                 logger.warning(f"Error restarting browser for {crawler_id}: {e}")
+                # Force cleanup even if close failed
+                if crawler_id in self._browsers:
+                    del self._browsers[crawler_id]
+                if crawler_id in self._active_contexts:
+                    del self._active_contexts[crawler_id]
+                if crawler_id in self._request_counts:
+                    del self._request_counts[crawler_id]
 
     async def cleanup_crawler(self, crawler_id: str):
         """Cleanup all resources for specific crawler"""
