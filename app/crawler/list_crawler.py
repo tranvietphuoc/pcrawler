@@ -17,9 +17,7 @@ class ListCrawler(BaseCrawler):
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
         self.max_requests_per_browser = 50  # Override for ListCrawler - restart more frequently
 
-    async def _open_context(self):
-        """Open Playwright context using base class method"""
-        return await self._open_playwright_context()
+    # Removed _open_context() - now using Async Context Manager directly
 
     async def get_total_pages(self, page, url: str) -> int:
         for i in range(self.max_retries):
@@ -139,77 +137,76 @@ class ListCrawler(BaseCrawler):
             try:
                 logger.info(f"Attempting to get industries (attempt {retry + 1}/{max_retries})")
                 
-                p, browser, context, page = await self._open_context()
-                
-                try:
-                    # 1. Load trang với timeout ổn định
-                    timeout = self.config.processing_config.get("timeout", 60000)
-                    network_timeout = self.config.processing_config.get("network_timeout", 45000)
-                    
-                    logger.info(f"Loading page with timeout={timeout}ms, network_timeout={network_timeout}ms")
-                    await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
-                    logger.info("Page loaded, waiting for network idle...")
-                    await page.wait_for_load_state("networkidle", timeout=network_timeout)
-                    logger.info("Network idle achieved")
-                    
-                    # 2. Đợi Select2 sẵn sàng
-                    logger.info("Waiting for Select2 to be ready...")
-                    if not await self._wait_for_select2_ready(page):
-                        raise Exception("Select2 dropdown not ready after timeout")
-                    logger.info("Select2 dropdown is ready")
-                    
-                    # 3. Scroll và load industries
-                    logger.info("Scrolling to load all industries...")
-                    total_industries = await self._scroll_and_load_industries(page)
-                    
-                    if total_industries == 0:
-                        raise Exception("No industries found after scrolling")
-                    
-                    logger.info(f"Scrolling completed. Found {total_industries} industry options")
-                    
-                    # 4. Thu thập industries
-                    logger.info("Extracting industry data...")
-                    nodes = await page.locator(self.config.get_xpath("industry_options")).all()
-                    logger.info(f"Processing {len(nodes)} industry nodes")
-                    
-                    out: List[Tuple[str, str]] = []
-                    skipped_count = 0
-                    
-                    for i, n in enumerate(nodes):
-                        try:
-                            text = (await n.text_content() or "").strip()
-                            if not text or text.lower() in ["no results found", "loading...", ""]:
+                # Use Async Context Manager for automatic cleanup
+                async with self._open_playwright_context() as (context, page):
+                    try:
+                        # 1. Load trang với timeout ổn định
+                        timeout = self.config.processing_config.get("timeout", 60000)
+                        network_timeout = self.config.processing_config.get("network_timeout", 45000)
+                        
+                        logger.info(f"Loading page with timeout={timeout}ms, network_timeout={network_timeout}ms")
+                        await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
+                        logger.info("Page loaded, waiting for network idle...")
+                        await page.wait_for_load_state("networkidle", timeout=network_timeout)
+                        logger.info("Network idle achieved")
+                        
+                        # 2. Đợi Select2 sẵn sàng
+                        logger.info("Waiting for Select2 to be ready...")
+                        if not await self._wait_for_select2_ready(page):
+                            raise Exception("Select2 dropdown not ready after timeout")
+                        logger.info("Select2 dropdown is ready")
+                        
+                        # 3. Scroll và load industries
+                        logger.info("Scrolling to load all industries...")
+                        total_industries = await self._scroll_and_load_industries(page)
+                        
+                        if total_industries == 0:
+                            raise Exception("No industries found after scrolling")
+                        
+                        logger.info(f"Scrolling completed. Found {total_industries} industry options")
+                        
+                        # 4. Thu thập industries
+                        logger.info("Extracting industry data...")
+                        nodes = await page.locator(self.config.get_xpath("industry_options")).all()
+                        logger.info(f"Processing {len(nodes)} industry nodes")
+                        
+                        out: List[Tuple[str, str]] = []
+                        skipped_count = 0
+                        
+                        for i, n in enumerate(nodes):
+                            try:
+                                text = (await n.text_content() or "").strip()
+                                if not text or text.lower() in ["no results found", "loading...", ""]:
+                                    skipped_count += 1
+                                    continue
+                                
+                                node_id = await n.get_attribute("id")
+                                val = (
+                                    node_id.split("-")[-1]
+                                    if (node_id and "-" in node_id)
+                                    else (await n.get_attribute("data-id")) or text
+                                )
+                                out.append((val, text))
+                                
+                                if (i + 1) % 10 == 0:  # Log progress mỗi 10 items
+                                    logger.info(f"Processed {i + 1}/{len(nodes)} industries...")
+                                    
+                            except Exception as e:
+                                logger.warning(f"Failed to process industry node {i}: {e}")
                                 skipped_count += 1
                                 continue
-                            
-                            node_id = await n.get_attribute("id")
-                            val = (
-                                node_id.split("-")[-1]
-                                if (node_id and "-" in node_id)
-                                else (await n.get_attribute("data-id")) or text
-                            )
-                            out.append((val, text))
-                            
-                            if (i + 1) % 10 == 0:  # Log progress mỗi 10 items
-                                logger.info(f"Processed {i + 1}/{len(nodes)} industries...")
-                                
-                        except Exception as e:
-                            logger.warning(f"Failed to process industry node {i}: {e}")
-                            skipped_count += 1
-                            continue
-                    
-                    if len(out) == 0:
-                        raise Exception("No valid industries extracted")
-                    
-                    logger.info(f"Industry extraction completed: {len(out)} valid, {skipped_count} skipped")
-                    logger.info(f"Successfully found {len(out)} industries")
-                    return out
-                    
-                finally:
-                    await page.close()
-                    await context.close()
-                    await browser.close()
-                    await p.stop()
+                        
+                        if len(out) == 0:
+                            raise Exception("No valid industries extracted")
+                        
+                        logger.info(f"Industry extraction completed: {len(out)} valid, {skipped_count} skipped")
+                        logger.info(f"Successfully found {len(out)} industries")
+                        return out
+                        
+                    except Exception as e:
+                        logger.error(f"Error in get_industries: {e}")
+                        raise
+                    # Context and page are automatically closed here
                     
             except Exception as e:
                 logger.error(f"Attempt {retry + 1} failed: {e}")
@@ -351,38 +348,29 @@ class ListCrawler(BaseCrawler):
         Thay vào đó: mở trang -> chọn ngành theo *tên* -> bấm nút 'btn-company' để apply filter,
         rồi dùng URL sau filter để phân trang và gom link.
         """
-        p, browser, context, page = await self._open_context()
-        try:
-            # Mở trang gốc
-            await page.goto(base_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")
-            await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
-
-            # Apply filter bằng UI
-            await self._apply_industry_filter(page, industry_name)
-
-            # URL sau filter (dùng làm base để thêm page=2,3,…)
-            filtered_url = page.url
-
-            # Lấy tổng số trang ngay trên trang hiện tại
-            total = await self._get_total_pages_current(page)
-
-            # Tạo danh sách URL các trang đã lọc
-            page_urls = [self._build_page_url(filtered_url, i) for i in range(1, total + 1)]
-
-        finally:
-            # Đóng browser ngay sau khi lấy được filtered_url để tránh conflict
+        # Use Async Context Manager for automatic cleanup
+        async with self._open_playwright_context() as (context, page):
             try:
-                await page.close()
-                await context.close()
-                # Don't close browser here as it's managed by the class
-                await p.stop()
+                # Mở trang gốc
+                await page.goto(base_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")
+                await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+
+                # Apply filter bằng UI
+                await self._apply_industry_filter(page, industry_name)
+
+                # URL sau filter (dùng làm base để thêm page=2,3,…)
+                filtered_url = page.url
+
+                # Lấy tổng số trang ngay trên trang hiện tại
+                total = await self._get_total_pages_current(page)
+
+                # Tạo danh sách URL các trang đã lọc
+                page_urls = [self._build_page_url(filtered_url, i) for i in range(1, total + 1)]
+
             except Exception as e:
-                logger.warning(f"Error closing browser: {e}")
-                # Force cleanup on error
-                try:
-                    await self.cleanup()
-                except:
-                    pass
+                logger.error(f"Error in get_company_links_for_industry: {e}")
+                raise
+            # Context and page are automatically closed here
 
         # Gom link "tổng quan" tuần tự theo từng trang - KHÔNG reuse page
         seen, uniq = set(), []
