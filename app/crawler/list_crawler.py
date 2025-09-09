@@ -101,11 +101,11 @@ class ListCrawler(BaseCrawler):
     async def _scroll_and_load_industries(self, page, max_scroll_attempts: int = None) -> int:
         """Scroll và load industries - đơn giản, đảm bảo load đủ 88"""
         # Giảm số lần scroll để tăng tốc độ
-        max_scroll_attempts = 100  # Giảm từ 150 xuống 100
+        max_scroll_attempts = 80  # Giảm từ 100 xuống 80
         
         prev_count = 0
         stable_count = 0
-        max_stable = 3  # Giảm từ 5 xuống 3 để tăng tốc độ
+        max_stable = 2  # Giảm từ 3 xuống 2 để tăng tốc độ
         
         for attempt in range(max_scroll_attempts):
             try:
@@ -128,12 +128,17 @@ class ListCrawler(BaseCrawler):
                     "ul.select2-results__options",
                 )
                 
-                # Tăng delay để đảm bảo load đủ
-                await asyncio.sleep(1.0)  # Tăng từ 0.25s lên 1.0s
+                # Giảm delay để tăng tốc độ
+                await asyncio.sleep(0.5)  # Giảm từ 1.0s xuống 0.5s
+                
+                # Force garbage collection mỗi 20 attempts để giảm memory
+                if attempt % 20 == 0:
+                    import gc
+                    gc.collect()
                 
             except Exception as e:
                 logger.warning(f"Scroll attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)  # Giảm sleep time
                 continue
         
         # Fallback: trả về số lượng hiện tại
@@ -319,12 +324,16 @@ class ListCrawler(BaseCrawler):
                                 "--no-sandbox",
                                 "--disable-setuid-sandbox",
                                 "--disable-dev-shm-usage",
+                                "--memory-pressure-off",  # Tắt memory pressure
+                                "--max_old_space_size=4096",  # Tăng heap size
                             ],
                         )
                         context = await browser.new_context()
                         page = await context.new_page()
+                        # Giảm timeout cho từng trang để tránh bị stuck
+                        page_timeout = min(self.config.processing_config["timeout"], 30000)  # Max 30s per page
                         await page.goto(
-                            page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
+                            page_url, timeout=page_timeout, wait_until="domcontentloaded"
                         )
                         await self._wait_for_network(page)
                         locs = await page.locator(self.config.get_xpath("company_links")).all()
@@ -390,17 +399,28 @@ class ListCrawler(BaseCrawler):
             # Context and page are automatically closed here
 
         # Gom link "tổng quan" tuần tự theo từng trang - KHÔNG reuse page
+        # Tối ưu hóa cho industries có nhiều companies
         seen, uniq = set(), []
-        for page_url in page_urls:
-            try:
-                links = await self.get_company_links_for_page(page_url, None)  # Không reuse page
-                if isinstance(links, list):
-                    for link in links:
-                        if link and link not in seen:
-                            seen.add(link)
-                            uniq.append(link)
-            except Exception as e:
-                print(f"[ERROR] Failed to crawl page {page_url}: {e}")
-                continue
+        batch_size = 5  # Xử lý 5 trang một lúc để giảm memory pressure
+        
+        for i in range(0, len(page_urls), batch_size):
+            batch_urls = page_urls[i:i + batch_size]
+            logger.info(f"Processing batch {i//batch_size + 1}/{(len(page_urls) + batch_size - 1)//batch_size} for industry {industry_name}")
+            
+            for page_url in batch_urls:
+                try:
+                    links = await self.get_company_links_for_page(page_url, None)  # Không reuse page
+                    if isinstance(links, list):
+                        for link in links:
+                            if link and link not in seen:
+                                seen.add(link)
+                                uniq.append(link)
+                except Exception as e:
+                    print(f"[ERROR] Failed to crawl page {page_url}: {e}")
+                    continue
+            
+            # Force garbage collection sau mỗi batch để giảm memory
+            import gc
+            gc.collect()
         return uniq
     
