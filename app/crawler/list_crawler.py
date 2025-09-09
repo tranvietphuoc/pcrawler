@@ -286,7 +286,7 @@ class ListCrawler(BaseCrawler):
                 pass
 
         # chờ load danh sách sau filter
-        await self._wait_for_networkidle_safe(page)
+        await self._wait_for_network(page)
         # đợi anchor công ty xuất hiện (nếu có)
         try:
             await page.wait_for_selector(self.config.get_xpath("company_links"), timeout=5000)
