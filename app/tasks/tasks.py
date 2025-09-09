@@ -55,9 +55,27 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             return normalized
             
         finally:
-            # Chỉ cleanup khi thật sự cần (không cleanup mỗi task)
-            # Browser sẽ được reuse cho task tiếp theo
-            loop.close()
+            # Proper cleanup để tránh "Task was destroyed but it is pending"
+            try:
+                # Cancel all pending tasks
+                pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                if pending_tasks:
+                    logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
+                    for task in pending_tasks:
+                        task.cancel()
+                    
+                    # Wait for cancellation to complete
+                    if pending_tasks:
+                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                
+                # Cleanup crawler resources
+                loop.run_until_complete(list_crawler.cleanup())
+                
+            except Exception as cleanup_error:
+                logger.warning(f"Cleanup error: {cleanup_error}")
+            finally:
+                # Close loop properly
+                loop.close()
             
     except Exception as e:
         logger.error(f"Failed to fetch links for industry '{industry_name}': {e}")
@@ -226,7 +244,27 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
             }
             
         finally:
-            loop.close()
+            # Proper cleanup để tránh "Task was destroyed but it is pending"
+            try:
+                # Cancel all pending tasks
+                pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                if pending_tasks:
+                    logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
+                    for task in pending_tasks:
+                        task.cancel()
+                    
+                    # Wait for cancellation to complete
+                    if pending_tasks:
+                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                
+                # Cleanup crawler resources
+                loop.run_until_complete(detail_crawler.cleanup())
+                
+            except Exception as cleanup_error:
+                logger.warning(f"Cleanup error: {cleanup_error}")
+            finally:
+                # Close loop properly
+                loop.close()
             
     except Exception as e:
         logger.error(f"Detail pages crawling failed: {e}")
@@ -344,7 +382,27 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
             }
             
         finally:
-            loop.close()
+            # Proper cleanup để tránh "Task was destroyed but it is pending"
+            try:
+                # Cancel all pending tasks
+                pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                if pending_tasks:
+                    logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
+                    for task in pending_tasks:
+                        task.cancel()
+                    
+                    # Wait for cancellation to complete
+                    if pending_tasks:
+                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                
+                # Cleanup crawler resources
+                loop.run_until_complete(contact_crawler.cleanup())
+                
+            except Exception as cleanup_error:
+                logger.warning(f"Cleanup error: {cleanup_error}")
+            finally:
+                # Close loop properly
+                loop.close()
             
     except Exception as e:
         logger.error(f"Contact pages crawling failed: {e}")
