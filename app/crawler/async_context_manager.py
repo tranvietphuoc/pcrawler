@@ -106,8 +106,22 @@ class AsyncBrowserContextManager:
         if worker_key in self._worker_browser_pool:
             browser = self._worker_browser_pool[worker_key]
             try:
-                # Enhanced health check
-                await browser.version()
+                # Enhanced health check: prefer is_connected() over version()
+                if hasattr(browser, "is_connected"):
+                    if not browser.is_connected():
+                        raise Exception("Browser disconnected")
+                else:
+                    # Fallback: try to access version safely (method or property)
+                    ver = None
+                    try:
+                        ver = await browser.version()  # if async method
+                    except TypeError:
+                        try:
+                            ver = browser.version  # property access
+                        except Exception:
+                            pass
+                    if not ver:
+                        raise Exception("Browser health check failed: version unavailable")
                 
                 # Check browser memory usage
                 if not self._restart_suspended.get(self._worker_id, False) and worker_key in self._memory_usage:
@@ -399,7 +413,22 @@ class AsyncBrowserContextManager:
             try:
                 # Simple health check
                 if hasattr(crawler, 'browser') and crawler.browser:
-                    await crawler.browser.version()
+                    b = crawler.browser
+                    if hasattr(b, "is_connected"):
+                        if not b.is_connected():
+                            raise Exception("Crawler browser disconnected")
+                    else:
+                        # Fallback safe version access
+                        ver = None
+                        try:
+                            ver = await b.version()
+                        except TypeError:
+                            try:
+                                ver = b.version
+                            except Exception:
+                                pass
+                        if not ver:
+                            raise Exception("Crawler browser health check failed: version unavailable")
                 return crawler
             except Exception as e:
                 logger.warning(f"Crawl4AI crawler {worker_key} health check failed: {e}")
