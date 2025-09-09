@@ -488,9 +488,3 @@ class ListCrawler(BaseCrawler):
         gc.collect()
 
         return uniq
-    
-orker-2       | [2025-09-09 14:49:41,941: INFO/ForkPoolWorker-2] Browser restarts resumed for worker worker_89798b241ff3
-worker-2       | [2025-09-09 14:49:41,942: WARNING/ForkPoolWorker-2] [Du lịch] Timeout on attempt 2/4 (pass 1)
-worker-1       | [2025-09-09 14:49:43,732: INFO/ForkPoolWorker-3] Restarting browser for worker worker_2b52b548d5ad after 51 requests
-worker-1       | [2025-09-09 14:49:43,738: WARNING/ForkPoolWorker-3] Error closing context for worker worker_2b52b548d5ad: BrowserContext.close: Protocol error (Target.disposeBrowserContext): Failed to find context with id 34A31B8D02052A2BC96AE4F67EA18E3B
-worker-1       | [2025-09-09 14:49:43,890: INFO/ForkPoolWorker-3] Restarted browser for worker worker_2b52b548d5ad with key worker_2b52b548d5ad_ListCrawler_128111287589024
