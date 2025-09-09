@@ -21,7 +21,7 @@ from app.tasks.celery_app import celery_app
 @celery_app.task(name="links.fetch_industry_links", bind=True)
 def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """
-    Fetch company links for a single industry (parallel processing)
+    Fetch company links for a single industry (optimized with browser reuse)
     """
     try:
         config = CrawlerConfig()
@@ -32,9 +32,9 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
         asyncio.set_event_loop(loop)
         
         try:
-            # Fetch links với retry logic
+            # Fetch links với optimized retry logic
             links = loop.run_until_complete(
-                _fetch_links_with_retry_async(list_crawler, base_url, industry_id, industry_name, pass_no)
+                _fetch_links_optimized_async(list_crawler, base_url, industry_id, industry_name, pass_no)
             )
             
             # Chuẩn hoá dữ liệu
@@ -55,26 +55,26 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             return normalized
             
         finally:
-            # Cleanup
-            loop.run_until_complete(list_crawler.cleanup())
+            # Chỉ cleanup khi thật sự cần (không cleanup mỗi task)
+            # Browser sẽ được reuse cho task tiếp theo
             loop.close()
             
     except Exception as e:
         logger.error(f"Failed to fetch links for industry '{industry_name}': {e}")
         return []
 
-async def _fetch_links_with_retry_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
-    """Async helper for link fetching with retry logic"""
+async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
+    """Optimized async helper for link fetching with smart retry logic"""
     # Adaptive retries/timeouts per pass - tối ưu cho large industries
     if pass_no == 1:
-        retries, timeout_s, delay_s = 3, 60, 2  # Giảm từ 90s xuống 60s để tránh browser timeout
+        retries, timeout_s, delay_s = 2, 90, 2  # Tăng timeout, giảm retries
     else:
-        retries, timeout_s, delay_s = 3, 90, 3  # Giảm từ 120s xuống 90s để tránh browser timeout
+        retries, timeout_s, delay_s = 2, 120, 3  # Tăng timeout cho pass 2+
     
     for attempt in range(retries + 1):
         try:
-            # Progressive timeout: tăng timeout mỗi attempt - tối ưu cho large industries
-            current_timeout = timeout_s + (attempt * 20)  # Giảm từ 30s xuống 20s
+            # Progressive timeout: tăng timeout mỗi attempt
+            current_timeout = timeout_s + (attempt * 30)
             logger.info(f"[{industry_name}] Attempt {attempt+1}/{retries+1} (pass {pass_no}) with timeout={current_timeout}s")
             
             links = await asyncio.wait_for(
@@ -89,30 +89,49 @@ async def _fetch_links_with_retry_async(list_crawler, base_url: str, industry_id
         except asyncio.TimeoutError:
             logger.warning(f"[{industry_name}] Timeout on attempt {attempt+1}/{retries+1} (pass {pass_no})")
         except Exception as e:
-            logger.warning(f"[{industry_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {e}")
+            error_msg = str(e)
+            logger.warning(f"[{industry_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {error_msg}")
             
-            # Handle TargetClosedError specifically
-            if "Target page, context or browser has been closed" in str(e) or "TargetClosedError" in str(e):
-                logger.warning(f"[{industry_name}] TargetClosedError detected, forcing browser restart...")
+            # Smart error handling - chỉ restart khi thật sự cần
+            needs_restart = False
+            
+            # Critical errors that require browser restart
+            if any(keyword in error_msg for keyword in [
+                "Target page, context or browser has been closed",
+                "TargetClosedError", 
+                "Browser.new_context",
+                "BrowserType.launch",
+                "Protocol error",
+                "Connection lost"
+            ]):
+                needs_restart = True
+                logger.warning(f"[{industry_name}] Critical error detected, browser restart needed...")
+            
+            # Non-critical errors - just retry
+            elif any(keyword in error_msg for keyword in [
+                "Timeout",
+                "Navigation timeout",
+                "Network error",
+                "Connection timeout"
+            ]):
+                logger.info(f"[{industry_name}] Network/timeout error, retrying without restart...")
+            
+            # Restart browser if needed
+            if needs_restart and attempt < retries:
                 try:
                     await list_crawler.cleanup()
-                    await asyncio.sleep(5)
-                    await list_crawler.create_fresh_browser_for_industry()
+                    await asyncio.sleep(3)  # Shorter wait
+                    # Browser will be recreated automatically on next call
                 except Exception as cleanup_error:
-                    logger.warning(f"[{industry_name}] Browser restart failed: {cleanup_error}")
-            
-            # If browser context error, try to restart browser
-            elif "Browser.new_context" in str(e) or "browser has been closed" in str(e):
-                logger.warning(f"[{industry_name}] Browser context error detected, attempting browser restart...")
-                try:
-                    await list_crawler.cleanup()
-                    await asyncio.sleep(3)
-                except Exception as cleanup_error:
-                    logger.warning(f"[{industry_name}] Browser cleanup failed: {cleanup_error}")
+                    logger.error(f"[{industry_name}] Cleanup failed: {cleanup_error}")
         
-        await asyncio.sleep(delay_s)
+        # Delay before retry (shorter for non-critical errors)
+        if attempt < retries:
+            wait_time = delay_s * (attempt + 1)
+            logger.info(f"[{industry_name}] Waiting {wait_time}s before retry...")
+            await asyncio.sleep(wait_time)
     
-    logger.error(f"[{industry_name}] Failed after {retries+1} attempts (pass {pass_no})")
+    logger.error(f"[{industry_name}] All attempts failed (pass {pass_no})")
     return []
 
 @celery_app.task(name="detail.crawl_and_store", bind=True)
@@ -130,7 +149,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
         
         try:
             # Create fresh browser for this task to prevent context errors
-            loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
+            # Browser will be created automatically by context manager
             total_companies = len(companies)
             processed = 0
             successful = 0
@@ -176,7 +195,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
                         loop.run_until_complete(detail_crawler.cleanup())
                         time.sleep(2)
-                        loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
+                        # Browser will be created automatically by context manager
                     
                 except Exception as batch_error:
                     logger.error(f"Detail batch {i//batch_size + 1} failed: {batch_error}")
@@ -187,7 +206,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                     try:
                         loop.run_until_complete(detail_crawler.cleanup())
                         time.sleep(1)
-                        loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
+                        # Browser will be created automatically by context manager
                     except:
                         pass
                     
@@ -236,7 +255,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
         
         try:
             # Create fresh browser for this task to prevent context errors
-            loop.run_until_complete(contact_crawler.create_fresh_browser_for_industry())
+            # Browser will be created automatically by context manager
             # Get company details từ DB
             company_details = db_manager.get_company_details_for_contact_crawl(batch_size)
             
@@ -294,7 +313,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
                         loop.run_until_complete(contact_crawler.cleanup())
                         time.sleep(2)
-                        loop.run_until_complete(contact_crawler.create_fresh_browser_for_industry())
+                        # Browser will be created automatically by context manager
                     
                 except Exception as batch_error:
                     logger.error(f"Contact batch {i//batch_size + 1} failed: {batch_error}")
@@ -305,7 +324,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     try:
                         loop.run_until_complete(contact_crawler.cleanup())
                         time.sleep(1)
-                        loop.run_until_complete(contact_crawler.create_fresh_browser_for_industry())
+                        # Browser will be created automatically by context manager
                     except:
                         pass
                     
@@ -422,7 +441,6 @@ def create_final_results():
             'message': f'Created final results with {count} companies (duplicated for multiple emails)',
             'count': count
         }
-        
     except Exception as e:
         logger.error(f"Failed to create final results: {e}")
         return {
@@ -448,7 +466,6 @@ def get_database_stats():
             'database_stats': stats,
             'extraction_summary': summary
         }
-        
     except Exception as e:
         logger.error(f"Failed to get database stats: {e}")
         return {
@@ -532,4 +549,4 @@ def export_final_csv(self):
         return {
             'status': 'failed',
             'message': str(e)
-        }
+    }

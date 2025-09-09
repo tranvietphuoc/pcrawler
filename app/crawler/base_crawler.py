@@ -62,15 +62,6 @@ class BaseCrawler:
         
         logger.info(f"{self.__class__.__name__} cleanup completed via Async Context Manager")
     
-    async def create_fresh_browser_for_industry(self):
-        """Create a completely fresh browser for each industry - 100% error prevention"""
-        # Cleanup existing browser completely
-        await self.cleanup()
-        
-        # Wait a bit for cleanup to complete
-        await asyncio.sleep(2)
-        
-        logger.info(f"{self.__class__.__name__} fresh browser created for industry")
     
     def get_stats(self) -> dict:
         """Get crawler statistics"""

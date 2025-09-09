@@ -91,7 +91,7 @@ async def run(
                     try:
                         await list_c.cleanup()
                         await asyncio.sleep(5)  # Wait longer for cleanup
-                        await list_c.create_fresh_browser_for_industry()
+                        # Browser will be created automatically by context manager
                     except Exception as cleanup_error:
                         logger.warning(f"[{ind_name}] Browser restart failed: {cleanup_error}")
                 
@@ -163,7 +163,7 @@ async def run(
         for ind_id, ind_name in failed_industries:
             # Create fresh browser for each retry industry
             logger.info(f"[Retry] Creating fresh browser for industry '{ind_name}'")
-            await list_c.create_fresh_browser_for_industry()
+            # Browser will be created automatically by context manager
             
             links = await fetch_links_with_retry(ind_id, ind_name, pass_no=2)
             if not links:
@@ -206,7 +206,7 @@ async def run(
             
             # Create fresh browser for final attempt
             logger.info(f"[Final Attempt] Creating fresh browser for industry '{ind_name}'")
-            await list_c.create_fresh_browser_for_industry()
+            # Browser will be created automatically by context manager
             
             # Aggressive retry settings for final attempt
             retries, timeout_s, delay_s = 5, 600, 10  # 10 minutes timeout, 5 retries, 10s delay
