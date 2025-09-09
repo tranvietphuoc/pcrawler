@@ -76,7 +76,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                     # Memory threshold check
                     if memory_after_gc > 1000:  # 1GB threshold
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
-                        detail_crawler.cleanup()
+                        loop.run_until_complete(detail_crawler.cleanup())
                         time.sleep(2)
                         loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
                     
@@ -87,7 +87,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                     
                     # Force cleanup on error
                     try:
-                        detail_crawler.cleanup()
+                        loop.run_until_complete(detail_crawler.cleanup())
                         time.sleep(1)
                         loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
                     except:
@@ -97,7 +97,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                     continue
             
             # Cleanup
-            detail_crawler.cleanup()
+            loop.run_until_complete(detail_crawler.cleanup())
             
             return {
                 'status': 'completed',
@@ -194,7 +194,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     # Memory threshold check
                     if memory_after_gc > 1000:  # 1GB threshold
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
-                        html_crawler.cleanup()
+                        loop.run_until_complete(html_crawler.cleanup())
                         time.sleep(2)
                         loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
                     
@@ -205,7 +205,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     
                     # Force cleanup on error
                     try:
-                        html_crawler.cleanup()
+                        loop.run_until_complete(html_crawler.cleanup())
                         time.sleep(1)
                         loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
                     except:
@@ -215,7 +215,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     continue
             
             # Cleanup
-            html_crawler.cleanup()
+            loop.run_until_complete(html_crawler.cleanup())
             
             return {
                 'status': 'completed',
