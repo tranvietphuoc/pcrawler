@@ -356,14 +356,24 @@ class AsyncBrowserContextManager:
             # Cleanup context
             if context:
                 try:
-                    await context.close()
+                    # Check if context is still valid before closing
+                    if hasattr(context, '_connection') and context._connection:
+                        await context.close()
+                    else:
+                        logger.debug(f"Context already closed for worker {self._worker_id}")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "Failed to find context" in error_msg or "Target.disposeBrowserContext" in error_msg:
+                        logger.debug(f"Context already disposed for worker {self._worker_id}: {e}")
+                    else:
+                        logger.warning(f"Error closing context for worker {self._worker_id}: {e}")
+                finally:
+                    # Always update active contexts count
                     async with self._lock:
                         worker_key = f"{self._worker_id}_{crawler_id}"
                         if worker_key in self._active_contexts:
                             self._active_contexts[worker_key] = max(0, self._active_contexts[worker_key] - 1)
-                    logger.debug(f"Closed context for worker {self._worker_id}, active contexts: {self._active_contexts.get(worker_key, 0)}")
-                except Exception as e:
-                    logger.warning(f"Error closing context for worker {self._worker_id}: {e}")
+                    logger.debug(f"Context cleanup completed for worker {self._worker_id}, active contexts: {self._active_contexts.get(worker_key, 0)}")
     
     @asynccontextmanager
     async def get_crawl4ai_crawler(self, crawler_id: str, user_agent: str, viewport: dict = None):
@@ -388,13 +398,23 @@ class AsyncBrowserContextManager:
             logger.error(f"Error in Crawl4AI crawler for worker {self._worker_id}: {e}")
             raise
         finally:
-            # Cleanup crawler
+            # Cleanup crawler with better error handling
             if crawler:
                 try:
-                    await crawler.close()
-                    logger.debug(f"Closed Crawl4AI crawler for worker {self._worker_id}")
+                    # Check if crawler browser is still valid before closing
+                    if hasattr(crawler, 'browser') and crawler.browser:
+                        if hasattr(crawler.browser, '_connection') and crawler.browser._connection:
+                            await crawler.close()
+                        else:
+                            logger.debug(f"Crawler browser already closed for worker {self._worker_id}")
+                    else:
+                        logger.debug(f"Crawler already closed for worker {self._worker_id}")
                 except Exception as e:
-                    logger.warning(f"Error closing Crawl4AI crawler for worker {self._worker_id}: {e}")
+                    error_msg = str(e)
+                    if "Failed to find context" in error_msg or "Target.disposeBrowserContext" in error_msg or "has been closed" in error_msg:
+                        logger.debug(f"Crawler already disposed for worker {self._worker_id}: {e}")
+                    else:
+                        logger.warning(f"Error closing Crawl4AI crawler for worker {self._worker_id}: {e}")
     
     async def _get_or_create_crawl4ai_crawler(self, crawler_id: str, user_agent: str, viewport: dict = None):
         """Get or create Crawl4AI crawler with process isolation"""
