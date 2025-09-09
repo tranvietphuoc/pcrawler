@@ -20,12 +20,10 @@ services:
           cpus: "0.5"
           memory: 1G
 
-  worker-1:
+  worker:
     build: .
-    container_name: crawler_worker_1
-    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker-1@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
+    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
     environment:
-      - CELERY_WORKER_ID=worker-1
       - CELERY_WORKER_CONCURRENCY=3
       - CELERY_WORKER_PREFETCH_MULTIPLIER=1
       - CELERY_WORKER_MAX_TASKS_PER_CHILD=20
@@ -38,76 +36,8 @@ services:
       - ./app:/app/app
       - ./config:/app/config
       - ./data:/app/data
-      - /tmp/playwright_worker-1:/tmp/playwright_worker-1
-      - /tmp/crawl4ai_worker-1:/tmp/crawl4ai_worker-1
-    depends_on:
-      - redis
-    networks:
-      - crawler_network
-    deploy:
-      resources:
-        limits:
-          cpus: "3.0"
-          memory: 4G
-        reservations:
-          cpus: "2.0"
-          memory: 3G
-    restart: unless-stopped
-
-  worker-2:
-    build: .
-    container_name: crawler_worker_2
-    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker-2@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
-    environment:
-      - CELERY_WORKER_ID=worker-2
-      - CELERY_WORKER_CONCURRENCY=3
-      - CELERY_WORKER_PREFETCH_MULTIPLIER=1
-      - CELERY_WORKER_MAX_TASKS_PER_CHILD=20
-      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=1500000
-      - REDIS_URL=redis://redis:6379/0
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
-      - TZ=Asia/Ho_Chi_Minh
-    volumes:
-      - ./app:/app/app
-      - ./config:/app/config
-      - ./data:/app/data
-      - /tmp/playwright_worker-2:/tmp/playwright_worker-2
-      - /tmp/crawl4ai_worker-2:/tmp/crawl4ai_worker-2
-    depends_on:
-      - redis
-    networks:
-      - crawler_network
-    deploy:
-      resources:
-        limits:
-          cpus: "3.0"
-          memory: 4G
-        reservations:
-          cpus: "2.0"
-          memory: 3G
-    restart: unless-stopped
-
-  worker-3:
-    build: .
-    container_name: crawler_worker_3
-    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker-3@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
-    environment:
-      - CELERY_WORKER_ID=worker-3
-      - CELERY_WORKER_CONCURRENCY=3
-      - CELERY_WORKER_PREFETCH_MULTIPLIER=1
-      - CELERY_WORKER_MAX_TASKS_PER_CHILD=20
-      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=1500000
-      - REDIS_URL=redis://redis:6379/0
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
-      - TZ=Asia/Ho_Chi_Minh
-    volumes:
-      - ./app:/app/app
-      - ./config:/app/config
-      - ./data:/app/data
-      - /tmp/playwright_worker-3:/tmp/playwright_worker-3
-      - /tmp/crawl4ai_worker-3:/tmp/crawl4ai_worker-3
+      - /tmp/playwright_workers:/tmp/playwright_workers
+      - /tmp/crawl4ai_workers:/tmp/crawl4ai_workers
     depends_on:
       - redis
     networks:
@@ -136,9 +66,7 @@ services:
       - ./data:/app/data
     depends_on:
       - redis
-      - worker-1
-      - worker-2
-      - worker-3
+      - worker
     networks:
       - crawler_network
     deploy:

@@ -32,7 +32,9 @@ class AsyncBrowserContextManager:
             self._request_counts: Dict[str, int] = {}
             self._last_restart: Dict[str, float] = {}
             self._memory_usage: Dict[str, float] = {}
-            self._worker_id = os.getenv('CELERY_WORKER_ID', 'default')
+            # Auto-generate worker_id from container name or environment
+            container_name = os.getenv('HOSTNAME', 'default')
+            self._worker_id = f"worker_{container_name}"
             self._process_id = os.getpid()
             
             # Enhanced resource limits with process isolation

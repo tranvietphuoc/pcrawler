@@ -53,8 +53,12 @@ docker-scale-2:
 	@echo "Balanced mode (2 workers) - Medium risk/speed"
 	docker-compose up --scale worker=2 -d
 
+docker-scale-3:
+	@echo "Fast mode (3 workers) - High performance, medium risk"
+	docker-compose up --scale worker=3 -d
+
 docker-scale-4:
-	@echo "Fast mode (4 workers) - High performance, medium risk"
+	@echo "Turbo mode (4 workers) - Max performance, higher risk"
 	docker-compose up --scale worker=4 -d
 
 docker-scale-8:
