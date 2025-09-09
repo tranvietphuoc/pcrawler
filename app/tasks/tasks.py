@@ -6,6 +6,7 @@ import time
 from celery import Celery
 from app.crawler.html_crawler import HTMLCrawler
 from app.crawler.detail_db_crawler import DetailDBCrawler
+from app.crawler.list_crawler import ListCrawler
 from app.extractor.email_extractor import EmailExtractor
 from app.extractor.company_details_extractor import CompanyDetailsExtractor
 from app.database.db_manager import DatabaseManager
@@ -16,6 +17,103 @@ logger = logging.getLogger(__name__)
 
 # Import celery app
 from app.tasks.celery_app import celery_app
+
+@celery_app.task(name="links.fetch_industry_links", bind=True)
+def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
+    """
+    Fetch company links for a single industry (parallel processing)
+    """
+    try:
+        config = CrawlerConfig()
+        list_crawler = ListCrawler(config)
+        
+        # Tạo event loop mới
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Fetch links với retry logic
+            links = loop.run_until_complete(
+                _fetch_links_with_retry_async(list_crawler, base_url, industry_id, industry_name, pass_no)
+            )
+            
+            # Chuẩn hoá dữ liệu
+            normalized = []
+            for item in links:
+                if isinstance(item, str):
+                    normalized.append({
+                        'name': '',
+                        'url': item,
+                        'industry': industry_name,
+                    })
+                elif isinstance(item, dict):
+                    item = {**item}
+                    item['industry'] = industry_name
+                    normalized.append(item)
+            
+            logger.info(f"Industry '{industry_name}' -> {len(normalized)} companies (pass {pass_no})")
+            return normalized
+            
+        finally:
+            # Cleanup
+            loop.run_until_complete(list_crawler.cleanup())
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Failed to fetch links for industry '{industry_name}': {e}")
+        return []
+
+async def _fetch_links_with_retry_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
+    """Async helper for link fetching with retry logic"""
+    # Adaptive retries/timeouts per pass
+    if pass_no == 1:
+        retries, timeout_s, delay_s = 4, 240, 3
+    else:
+        retries, timeout_s, delay_s = 4, 360, 5
+    
+    for attempt in range(retries + 1):
+        try:
+            # Progressive timeout: tăng timeout mỗi attempt
+            current_timeout = timeout_s + (attempt * 60)
+            logger.info(f"[{industry_name}] Attempt {attempt+1}/{retries+1} (pass {pass_no}) with timeout={current_timeout}s")
+            
+            links = await asyncio.wait_for(
+                list_crawler.get_company_links_for_industry(base_url, industry_id, industry_name),
+                timeout=current_timeout,
+            )
+            
+            if links:
+                logger.info(f"[{industry_name}] Success (pass {pass_no}) -> {len(links)} links")
+                return links
+                
+        except asyncio.TimeoutError:
+            logger.warning(f"[{industry_name}] Timeout on attempt {attempt+1}/{retries+1} (pass {pass_no})")
+        except Exception as e:
+            logger.warning(f"[{industry_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {e}")
+            
+            # Handle TargetClosedError specifically
+            if "Target page, context or browser has been closed" in str(e) or "TargetClosedError" in str(e):
+                logger.warning(f"[{industry_name}] TargetClosedError detected, forcing browser restart...")
+                try:
+                    await list_crawler.cleanup()
+                    await asyncio.sleep(5)
+                    await list_crawler.create_fresh_browser_for_industry()
+                except Exception as cleanup_error:
+                    logger.warning(f"[{industry_name}] Browser restart failed: {cleanup_error}")
+            
+            # If browser context error, try to restart browser
+            elif "Browser.new_context" in str(e) or "browser has been closed" in str(e):
+                logger.warning(f"[{industry_name}] Browser context error detected, attempting browser restart...")
+                try:
+                    await list_crawler.cleanup()
+                    await asyncio.sleep(3)
+                except Exception as cleanup_error:
+                    logger.warning(f"[{industry_name}] Browser cleanup failed: {cleanup_error}")
+        
+        await asyncio.sleep(delay_s)
+    
+    logger.error(f"[{industry_name}] Failed after {retries+1} attempts (pass {pass_no})")
+    return []
 
 @celery_app.task(name="detail.crawl_and_store", bind=True)
 def crawl_detail_pages(self, companies: list, batch_size: int = 10):

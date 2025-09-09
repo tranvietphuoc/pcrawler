@@ -5,6 +5,7 @@ import pandas as pd
 from typing import List, Dict, Any
 from app.crawler.list_crawler import ListCrawler
 from app.tasks.tasks import (
+    fetch_industry_links as task_fetch_industry_links,
     crawl_detail_pages as task_crawl_detail_pages,
     extract_company_details as task_extract_company_details,
     crawl_contact_pages_from_details as task_crawl_contact_from_details,
@@ -62,17 +63,19 @@ async def run(
     async def fetch_links_with_retry(ind_id: str, ind_name: str, pass_no: int = 1) -> List[str]:
         # Adaptive retries/timeouts per pass (tăng để giảm miss ở industry lớn)
         if pass_no == 1:
-            retries, timeout_s, delay_s = 3, 180, 2
+            retries, timeout_s, delay_s = 4, 240, 3  # Tăng timeout và retries
         else:
-            retries, timeout_s, delay_s = 3, 300, 3
+            retries, timeout_s, delay_s = 4, 360, 5  # Tăng timeout và retries
         links_local: List[str] = []
         logger.info(f"[{ind_name}] Start fetching (pass {pass_no}) with timeout={timeout_s}s, retries={retries}")
         for attempt in range(retries + 1):
             try:
-                logger.info(f"[{ind_name}] Attempt {attempt+1}/{retries+1} (pass {pass_no})")
+                # Progressive timeout: tăng timeout mỗi attempt
+                current_timeout = timeout_s + (attempt * 60)  # +60s mỗi attempt
+                logger.info(f"[{ind_name}] Attempt {attempt+1}/{retries+1} (pass {pass_no}) with timeout={current_timeout}s")
                 links_local = await asyncio.wait_for(
                     list_c.get_company_links_for_industry(base_url, ind_id, ind_name),
-                    timeout=timeout_s,
+                    timeout=current_timeout,
                 )
                 logger.info(f"[{ind_name}] Success (pass {pass_no}) -> {len(links_local)} links")
                 if links_local:
@@ -82,8 +85,18 @@ async def run(
             except Exception as e:
                 logger.warning(f"[{ind_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {e}")
                 
+                # Handle TargetClosedError specifically
+                if "Target page, context or browser has been closed" in str(e) or "TargetClosedError" in str(e):
+                    logger.warning(f"[{ind_name}] TargetClosedError detected, forcing browser restart...")
+                    try:
+                        await list_c.cleanup()
+                        await asyncio.sleep(5)  # Wait longer for cleanup
+                        await list_c.create_fresh_browser_for_industry()
+                    except Exception as cleanup_error:
+                        logger.warning(f"[{ind_name}] Browser restart failed: {cleanup_error}")
+                
                 # If browser context error, try to restart browser
-                if "Browser.new_context" in str(e) or "browser has been closed" in str(e):
+                elif "Browser.new_context" in str(e) or "browser has been closed" in str(e):
                     logger.warning(f"[{ind_name}] Browser context error detected, attempting browser restart...")
                     try:
                         await list_c.cleanup()
@@ -98,43 +111,51 @@ async def run(
     failed_industries: List[tuple] = []
     industry_link_counts: Dict[str, int] = {}
 
-    # PHASE 0 - PASS 1: Fetch all company links for all industries (sequential)
-    logger.info("PHASE 0 - PASS 1: Fetching all company links...")
+    # PHASE 0 - PASS 1: Fetch all company links for all industries (PARALLEL)
+    logger.info("PHASE 0 - PASS 1: Fetching all company links in parallel...")
+    
+    # Submit all industry link fetching tasks in parallel
+    link_tasks = []
     for idx, (ind_id, ind_name) in enumerate(industries, start=1):
-        # Create fresh browser for each industry to prevent 100% browser context errors
-        logger.info(f"[{idx}/{len(industries)}] Creating fresh browser for industry '{ind_name}'")
-        await list_c.create_fresh_browser_for_industry()
-        
-        links = await fetch_links_with_retry(ind_id, ind_name, pass_no=1)
-        if not links:
-            logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
+        logger.info(f"[{idx}/{len(industries)}] Submitting link fetching task for industry '{ind_name}'")
+        task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
+        link_tasks.append((task, ind_id, ind_name))
+    
+    # Collect results from parallel tasks
+    logger.info(f"Waiting for {len(link_tasks)} industry link fetching tasks to complete...")
+    for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
+        try:
+            links = task.get(timeout=600)  # 10 minutes timeout per industry
+            if not links:
+                logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
+                failed_industries.append((ind_id, ind_name))
+                continue
+            
+            # Check if we got reasonable number of links (industry size validation)
+            if len(links) < 10:  # Industry quá nhỏ, có thể bị miss
+                logger.warning(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Only {len(links)} links (suspiciously low)")
+                # Try one more time with longer timeout
+                logger.info(f"[{idx}/{len(industries)}] Retrying '{ind_name}' with extended timeout...")
+                retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
+                links_retry = retry_task.get(timeout=600)
+                if links_retry and len(links_retry) > len(links):
+                    links = links_retry
+                    logger.info(f"[{idx}/{len(industries)}] Retry successful: {len(links)} links")
+            
+            logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
+            all_company_links.extend(links)
+            industry_link_counts[ind_name] = len(links)
+            
+        except Exception as e:
+            logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED: {e}")
             failed_industries.append((ind_id, ind_name))
-            continue
-        logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
-        # Chuẩn hoá dữ liệu company và submit tasks ngay
-        normalized: List[Dict[str, Any]] = []
-        for item in links:
-            if isinstance(item, str):
-                normalized.append({
-                    'name': '',
-                    'url': item,
-                    'industry': ind_name,
-                })
-            elif isinstance(item, dict):
-                item = {**item}
-                item['industry'] = ind_name
-                normalized.append(item)
-        all_company_links.extend(normalized)
-        industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
-        
-        # Submit detail batches ngay sau khi fetch xong industry này
-        for i in range(0, len(normalized), batch_size):
-            batch = normalized[i:i+batch_size]
-            t = task_crawl_detail_pages.delay(batch, batch_size)
-            detail_tasks.append(t)
-        
-        # Delay giữa các industry để tránh overload
-        await asyncio.sleep(2)
+    
+    # Submit detail crawling tasks for all collected links
+    logger.info(f"Submitting detail crawling tasks for {len(all_company_links)} companies...")
+    for i in range(0, len(all_company_links), batch_size):
+        batch = all_company_links[i:i+batch_size]
+        task = task_crawl_detail_pages.delay(batch, batch_size)
+        detail_tasks.append(task)
 
     # PHASE 0 - PASS 2: Retry failed industries
     if failed_industries:
@@ -303,12 +324,12 @@ async def run(
     except Exception as e:
         logger.warning(f"Error cleaning up ListCrawler: {e}")
 
-    return {
-        "status": "success",
-        "total_industries": len(industries),
+        return {
+            "status": "success",
+            "total_industries": len(industries),
         "total_companies": total_companies,
         "final_output": res.get('output'),
-    }
+        }
 
 
 def main():
