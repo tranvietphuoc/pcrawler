@@ -45,38 +45,55 @@ make docker-merge    # Merge CSV files
 ### Complete Crawling Process
 
 ```mermaid
-graph TD
-    A[Start Crawling] --> B[Get Industries List]
-    B --> C[Submit Industry Link Tasks to Celery]
-    C --> D[Parallel Link Fetching]
-    D --> E[Collect All Company Links]
-    E --> F[Submit Detail Crawling Tasks]
-    F --> G[Parallel Detail HTML Crawling]
-    G --> H[Store HTML in detail_html_storage]
-    H --> I[Submit Company Details Extraction Tasks]
-    I --> J[Load HTML from detail_html_storage]
-    J --> K[Extract Company Details]
-    K --> L[Store in company_details table]
-    L --> M[Submit Contact HTML Crawling Tasks]
-    M --> N[Load Website/Facebook URLs from company_details]
-    N --> O[Parallel Contact HTML Crawling]
-    O --> P[Store HTML in contact_html_storage]
-    P --> Q[Submit Email Extraction Tasks]
-    Q --> R[Load HTML from contact_html_storage]
-    R --> S[Extract Emails using Crawl4AI]
-    S --> T[Store in email_extraction table]
-    T --> U[Submit Final CSV Export Task]
-    U --> V[Join All Tables]
-    V --> W[Export Final CSV]
-    W --> X[End]
+graph LR
+    subgraph "Phase 0: Link Fetching"
+        A[Start] --> B[Get Industries]
+        B --> C[Submit Link Tasks]
+        C --> D[Parallel Link Fetching]
+        D --> E[Collect Links]
+    end
+
+    subgraph "Phase 1: Detail Crawling"
+        E --> F[Submit Detail Tasks]
+        F --> G[Parallel Detail Crawling]
+        G --> H[Store HTML in DB]
+    end
+
+    subgraph "Phase 2: Extract Details"
+        H --> I[Submit Extract Tasks]
+        I --> J[Load HTML from DB]
+        J --> K[Extract Company Info]
+        K --> L[Store in company_details]
+    end
+
+    subgraph "Phase 3: Contact Crawling"
+        L --> M[Submit Contact Tasks]
+        M --> N[Load Website/Facebook URLs]
+        N --> O[Parallel Contact Crawling]
+        O --> P[Store Contact HTML]
+    end
+
+    subgraph "Phase 4: Email Extraction"
+        P --> Q[Submit Email Tasks]
+        Q --> R[Load Contact HTML]
+        R --> S[Extract Emails]
+        S --> T[Store Emails]
+    end
+
+    subgraph "Phase 5: Final Export"
+        T --> U[Submit Export Task]
+        U --> V[Join All Tables]
+        V --> W[Export CSV]
+        W --> X[End]
+    end
 
     %% Styling
-    classDef phase0 fill:#e1f5fe
-    classDef phase1 fill:#f3e5f5
-    classDef phase2 fill:#e8f5e8
-    classDef phase3 fill:#fff3e0
-    classDef phase4 fill:#fce4ec
-    classDef phase5 fill:#f1f8e9
+    classDef phase0 fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef phase1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef phase2 fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef phase3 fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef phase4 fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef phase5 fill:#f1f8e9,stroke:#33691e,stroke-width:2px
 
     class A,B,C,D,E phase0
     class F,G,H phase1
@@ -200,32 +217,62 @@ erDiagram
 ### Celery Tasks
 
 ```mermaid
-graph LR
-    A[Main Process] --> B[fetch_industry_links]
-    A --> C[crawl_detail_pages]
-    A --> D[extract_company_details]
-    A --> E[crawl_contact_pages_from_details]
-    A --> F[extract_emails_from_contact]
-    A --> G[export_final_csv]
+graph TB
+    subgraph "Main Process"
+        A[Main Orchestrator]
+    end
 
-    B --> H[Celery Workers]
-    C --> H
-    D --> H
+    subgraph "Celery Tasks"
+        B[fetch_industry_links]
+        C[crawl_detail_pages]
+        D[extract_company_details]
+        E[crawl_contact_pages_from_details]
+        F[extract_emails_from_contact]
+        G[export_final_csv]
+    end
+
+    subgraph "Celery Workers"
+        H[Worker 1]
+        I[Worker 2]
+        J[Worker N]
+    end
+
+    subgraph "Database Storage"
+        K[detail_html_storage]
+        L[company_details]
+        M[contact_html_storage]
+        N[email_extraction]
+    end
+
+    A --> B
+    A --> C
+    A --> D
+    A --> E
+    A --> F
+    A --> G
+
+    B --> H
+    C --> I
+    D --> J
     E --> H
-    F --> H
-    G --> H
+    F --> I
+    G --> J
 
-    H --> I[Parallel Processing]
-    I --> J[Database Storage]
+    H --> K
+    I --> L
+    J --> M
+    H --> N
 
     %% Styling
-    classDef task fill:#e3f2fd
-    classDef worker fill:#f3e5f5
-    classDef storage fill:#e8f5e8
+    classDef main fill:#e3f2fd,stroke:#1976d2,stroke-width:3px
+    classDef task fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef worker fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef storage fill:#fff3e0,stroke:#f57c00,stroke-width:2px
 
-    class A,B,C,D,E,F,G task
-    class H,I worker
-    class J storage
+    class A main
+    class B,C,D,E,F,G task
+    class H,I,J worker
+    class K,L,M,N storage
 ```
 
 #### Task Descriptions
