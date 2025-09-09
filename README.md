@@ -40,6 +40,205 @@ make docker-scale-2  # Fast mode (2 workers) - Balanced speed/risk
 make docker-merge    # Merge CSV files
 ```
 
+## Architecture Flow
+
+### Complete Crawling Process
+
+```mermaid
+graph TD
+    A[Start Crawling] --> B[Get Industries List]
+    B --> C[Submit Industry Link Tasks to Celery]
+    C --> D[Parallel Link Fetching]
+    D --> E[Collect All Company Links]
+    E --> F[Submit Detail Crawling Tasks]
+    F --> G[Parallel Detail HTML Crawling]
+    G --> H[Store HTML in detail_html_storage]
+    H --> I[Submit Company Details Extraction Tasks]
+    I --> J[Load HTML from detail_html_storage]
+    J --> K[Extract Company Details]
+    K --> L[Store in company_details table]
+    L --> M[Submit Contact HTML Crawling Tasks]
+    M --> N[Load Website/Facebook URLs from company_details]
+    N --> O[Parallel Contact HTML Crawling]
+    O --> P[Store HTML in contact_html_storage]
+    P --> Q[Submit Email Extraction Tasks]
+    Q --> R[Load HTML from contact_html_storage]
+    R --> S[Extract Emails using Crawl4AI]
+    S --> T[Store in email_extraction table]
+    T --> U[Submit Final CSV Export Task]
+    U --> V[Join All Tables]
+    V --> W[Export Final CSV]
+    W --> X[End]
+
+    %% Styling
+    classDef phase0 fill:#e1f5fe
+    classDef phase1 fill:#f3e5f5
+    classDef phase2 fill:#e8f5e8
+    classDef phase3 fill:#fff3e0
+    classDef phase4 fill:#fce4ec
+    classDef phase5 fill:#f1f8e9
+
+    class A,B,C,D,E phase0
+    class F,G,H phase1
+    class I,J,K,L phase2
+    class M,N,O,P phase3
+    class Q,R,S,T phase4
+    class U,V,W,X phase5
+```
+
+### Database Tables
+
+```mermaid
+erDiagram
+    detail_html_storage {
+        int id PK
+        string company_name
+        string company_url
+        text html_content
+        string industry
+        datetime created_at
+    }
+
+    company_details {
+        int id PK
+        string company_name
+        string company_url
+        string address
+        string phone
+        string website
+        string facebook
+        string linkedin
+        string tiktok
+        string youtube
+        string instagram
+        string created_year
+        string revenue
+        string scale
+        string industry
+        datetime created_at
+    }
+
+    contact_html_storage {
+        int id PK
+        string company_name
+        string url
+        string url_type
+        text html_content
+        datetime created_at
+    }
+
+    email_extraction {
+        int id PK
+        string company_name
+        string extracted_email
+        string email_source
+        float confidence_score
+        datetime created_at
+    }
+
+    detail_html_storage ||--o{ company_details : "extracts from"
+    company_details ||--o{ contact_html_storage : "crawls contact pages"
+    contact_html_storage ||--o{ email_extraction : "extracts emails from"
+```
+
+### Phase Details
+
+#### **Phase 0: Link Fetching (PARALLEL)**
+
+- **Input**: Base URL, Industries list
+- **Process**: Submit industry link fetching tasks to Celery workers
+- **Output**: All company links collected
+- **Time**: ~20-30 minutes (vs 3+ hours sequential)
+
+#### **Phase 1: Detail HTML Crawling (PARALLEL)**
+
+- **Input**: Company links from Phase 0
+- **Process**: Crawl detail pages, store HTML content
+- **Output**: HTML stored in `detail_html_storage` table
+- **Time**: ~3 hours for 22k companies
+
+#### **Phase 2: Company Details Extraction (PARALLEL)**
+
+- **Input**: HTML from `detail_html_storage`
+- **Process**: Extract company info (name, address, phone, website, social media)
+- **Output**: Structured data in `company_details` table
+- **Time**: ~1.2 hours for 22k companies
+
+#### **Phase 3: Contact HTML Crawling (PARALLEL)**
+
+- **Input**: Website/Facebook URLs from `company_details`
+- **Process**: Crawl contact pages, store HTML content
+- **Output**: HTML stored in `contact_html_storage` table
+- **Time**: ~4.9 hours for 22k companies
+
+#### **Phase 4: Email Extraction (PARALLEL)**
+
+- **Input**: HTML from `contact_html_storage`
+- **Process**: Extract emails using Crawl4AI queries
+- **Output**: Emails in `email_extraction` table
+- **Time**: ~1.8 hours for 22k companies
+
+#### **Phase 5: Final CSV Export**
+
+- **Input**: All tables (detail_html_storage, company_details, email_extraction)
+- **Process**: Join tables, create final CSV
+- **Output**: `company_contacts.csv` with all data
+- **Time**: ~1 minute
+
+### Performance Comparison
+
+| Phase              | Sequential    | Parallel      | Improvement       |
+| ------------------ | ------------- | ------------- | ----------------- |
+| Link Fetching      | 3.3 hours     | 20 minutes    | **10x faster**    |
+| Detail Crawling    | 3 hours       | 3 hours       | Same              |
+| Details Extraction | 1.2 hours     | 1.2 hours     | Same              |
+| Contact Crawling   | 4.9 hours     | 4.9 hours     | Same              |
+| Email Extraction   | 1.8 hours     | 1.8 hours     | Same              |
+| CSV Export         | 1 minute      | 1 minute      | Same              |
+| **TOTAL**          | **~14 hours** | **~11 hours** | **3 hours saved** |
+
+### Celery Tasks
+
+```mermaid
+graph LR
+    A[Main Process] --> B[fetch_industry_links]
+    A --> C[crawl_detail_pages]
+    A --> D[extract_company_details]
+    A --> E[crawl_contact_pages_from_details]
+    A --> F[extract_emails_from_contact]
+    A --> G[export_final_csv]
+
+    B --> H[Celery Workers]
+    C --> H
+    D --> H
+    E --> H
+    F --> H
+    G --> H
+
+    H --> I[Parallel Processing]
+    I --> J[Database Storage]
+
+    %% Styling
+    classDef task fill:#e3f2fd
+    classDef worker fill:#f3e5f5
+    classDef storage fill:#e8f5e8
+
+    class A,B,C,D,E,F,G task
+    class H,I worker
+    class J storage
+```
+
+#### Task Descriptions
+
+| Task                               | Purpose                             | Input                 | Output                    |
+| ---------------------------------- | ----------------------------------- | --------------------- | ------------------------- |
+| `fetch_industry_links`             | Get company links for each industry | Industry ID, Name     | List of company URLs      |
+| `crawl_detail_pages`               | Crawl company detail pages          | Company URLs          | HTML stored in DB         |
+| `extract_company_details`          | Extract company info from HTML      | HTML content          | Structured company data   |
+| `crawl_contact_pages_from_details` | Crawl contact pages                 | Website/Facebook URLs | Contact HTML stored in DB |
+| `extract_emails_from_contact`      | Extract emails from contact HTML    | Contact HTML          | Email addresses           |
+| `export_final_csv`                 | Create final CSV file               | All database tables   | Final CSV output          |
+
 ## Workflow
 
 ### 1. Setup Docker
