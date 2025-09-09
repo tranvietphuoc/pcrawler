@@ -16,43 +16,34 @@ class AsyncBrowserContextManager:
     Enhanced async context manager for browser instances with process isolation,
     memory monitoring, and enhanced error recovery.
     """
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
     
     def __init__(self):
-        if not self._initialized:
-            self._browsers: Dict[str, Any] = {}
-            self._active_contexts: Dict[str, int] = {}
-            self._request_counts: Dict[str, int] = {}
-            self._last_restart: Dict[str, float] = {}
-            self._memory_usage: Dict[str, float] = {}
-            # Auto-generate worker_id from container name or environment
-            container_name = os.getenv('HOSTNAME', 'default')
-            self._worker_id = f"worker_{container_name}"
-            self._process_id = os.getpid()
-            
-            # Create worker-specific lock (not singleton)
-            self._lock = asyncio.Lock()
-            
-            # Enhanced resource limits with process isolation
-            self._max_contexts_per_worker = 2  # Further reduced for better isolation
-            self._browser_restart_threshold = 50  # Less aggressive restart to avoid conflicts
-            self._context_lifetime = 180  # Longer lifetime to avoid premature closure
-            self._memory_threshold_mb = 400  # Lower memory limit per browser
-            self._max_memory_per_worker_mb = 800  # Lower total memory limit per worker
-            
-            # Process isolation settings
-            self._worker_browser_pool = {}  # Separate browser pool per worker
-            self._worker_memory_tracker = {}  # Memory tracking per worker
-            self._restart_suspended: Dict[str, bool] = {}  # Suspend restarts per worker
-            
-            self._initialized = True
-            logger.info(f"AsyncBrowserContextManager initialized for worker {self._worker_id} (PID: {self._process_id})")
+        self._browsers: Dict[str, Any] = {}
+        self._active_contexts: Dict[str, int] = {}
+        self._request_counts: Dict[str, int] = {}
+        self._last_restart: Dict[str, float] = {}
+        self._memory_usage: Dict[str, float] = {}
+        # Auto-generate worker_id from container name or environment
+        container_name = os.getenv('HOSTNAME', 'default')
+        self._worker_id = f"worker_{container_name}"
+        self._process_id = os.getpid()
+        
+        # Create worker-specific lock (not singleton)
+        self._lock = asyncio.Lock()
+        
+        # Enhanced resource limits with process isolation
+        self._max_contexts_per_worker = 2  # Further reduced for better isolation
+        self._browser_restart_threshold = 50  # Less aggressive restart to avoid conflicts
+        self._context_lifetime = 180  # Longer lifetime to avoid premature closure
+        self._memory_threshold_mb = 400  # Lower memory limit per browser
+        self._max_memory_per_worker_mb = 800  # Lower total memory limit per worker
+        
+        # Process isolation settings
+        self._worker_browser_pool = {}  # Separate browser pool per worker
+        self._worker_memory_tracker = {}  # Memory tracking per worker
+        self._restart_suspended: Dict[str, bool] = {}  # Suspend restarts per worker
+        
+        logger.info(f"AsyncBrowserContextManager initialized for worker {self._worker_id} (PID: {self._process_id})")
     
     async def _get_worker_memory_usage(self) -> float:
         """Get current memory usage for this worker process"""
