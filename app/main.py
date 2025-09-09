@@ -63,6 +63,7 @@ async def run(
     
     # Load existing checkpoints
     import json
+    import re
     checkpoint_dir = "/tmp"
     if os.path.exists(checkpoint_dir):
         for filename in os.listdir(checkpoint_dir):
@@ -71,7 +72,17 @@ async def run(
                     with open(os.path.join(checkpoint_dir, filename), 'r') as f:
                         checkpoint_data = json.load(f)
                         if checkpoint_data:
-                            industry_name = filename.replace("checkpoint_", "").replace(".json", "").split("_")[0]
+                            # Extract industry name from sanitized filename
+                            # Format: checkpoint_{sanitized_name}_{pass_no}.json
+                            parts = filename.replace("checkpoint_", "").replace(".json", "").split("_")
+                            if len(parts) >= 2:
+                                # Reconstruct original industry name (approximate)
+                                sanitized_name = "_".join(parts[:-1])  # All parts except last (pass_no)
+                                # This is approximate - we can't perfectly reconstruct the original name
+                                industry_name = sanitized_name.replace("_", " ")
+                            else:
+                                industry_name = filename
+                            
                             all_company_links.extend(checkpoint_data)
                             logger.info(f"Loaded checkpoint: {industry_name} -> {len(checkpoint_data)} links")
                 except Exception as e:
