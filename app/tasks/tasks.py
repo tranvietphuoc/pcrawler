@@ -6,7 +6,7 @@ import time
 from celery import Celery
 from app.crawler.html_crawler import HTMLCrawler
 from app.crawler.detail_db_crawler import DetailDBCrawler
-from app.extractor.crawl4ai_email_extractor import Crawl4AIEmailExtractor
+from app.extractor.email_extractor import EmailExtractor
 from app.extractor.company_details_extractor import CompanyDetailsExtractor
 from app.database.db_manager import DatabaseManager
 from config import CrawlerConfig
@@ -282,7 +282,7 @@ def extract_emails_from_contact(self, batch_size: int = 50):
     """
     try:
         config = CrawlerConfig()
-        email_extractor = Crawl4AIEmailExtractor(config)
+        email_extractor = EmailExtractor(config)
         
         # Extract emails from database
         results = email_extractor.extract_from_db_batch(batch_size)
@@ -342,7 +342,7 @@ def get_database_stats():
         db_manager = DatabaseManager()
         stats = db_manager.get_stats()
         
-        email_extractor = Crawl4AIEmailExtractor()
+        email_extractor = EmailExtractor()
         summary = email_extractor.get_extraction_summary()
         
         return {

@@ -4,7 +4,7 @@ import uuid
 import pandas as pd
 from typing import List, Dict, Any
 from app.crawler.list_crawler import ListCrawler
-from app.tasks.html_tasks import (
+from app.tasks.tasks import (
     crawl_detail_pages as task_crawl_detail_pages,
     extract_company_details as task_extract_company_details,
     crawl_contact_pages_from_details as task_crawl_contact_from_details,

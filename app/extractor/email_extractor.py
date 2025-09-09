@@ -9,7 +9,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class Crawl4AIEmailExtractor:
+class EmailExtractor:
     def __init__(self, config: CrawlerConfig = None):
         self.config = config or CrawlerConfig()
         self.db_manager = DatabaseManager()
@@ -66,31 +66,29 @@ class Crawl4AIEmailExtractor:
             
             crawler = AsyncWebCrawler()
             
-            try:
-                # Extract từ HTML content sử dụng Crawl4ai
-                result = await crawler.extract(
-                    html_content=html_content,
-                    extraction_strategy=LLMExtractionStrategy(
-                        provider="ollama/llama2",
-                        api_token="ollama",
-                        instruction=queries[0]  # Sử dụng query đầu tiên
-                    )
+            # Extract từ HTML content sử dụng Crawl4ai
+            result = await crawler.extract(
+                html_content=html_content,
+                extraction_strategy=LLMExtractionStrategy(
+                    provider="ollama/llama2",
+                    api_token="ollama",
+                    instruction=queries[0]  # Sử dụng query đầu tiên
                 )
-                
-                # Parse extracted content
-                extracted_text = result.extracted_content or ""
-                
-                # Extract emails từ extracted text
-                emails = self._find_emails_regex(extracted_text)
-                
-                # Filter valid emails
-                valid_emails = [email for email in emails if self._valid_email(email)]
-                
-                logger.info(f"Extracted {len(valid_emails)} emails using Crawl4ai {url_type} query")
-                return valid_emails
-                
-            finally:
-                await crawler.close()
+            )
+            
+            # Parse extracted content
+            extracted_text = result.extracted_content or ""
+            
+            # Extract emails từ extracted text
+            emails = self._find_emails_regex(extracted_text)
+            
+            # Filter valid emails
+            valid_emails = [email for email in emails if self._valid_email(email)]
+            
+            logger.info(f"Extracted {len(valid_emails)} emails using Crawl4ai {url_type} query")
+            return valid_emails
+            
+            # Note: crawler.close() is handled automatically by Async Context Manager
             
         except Exception as e:
             logger.error(f"Failed to extract emails with crawl4ai query: {e}")

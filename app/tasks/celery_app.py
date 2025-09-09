@@ -10,7 +10,7 @@ celery_app = Celery("crawler", broker=broker, backend=backend)
 
 # (1) tell Celery where to find tasks
 # Use new phased tasks
-celery_app.conf.include = ["app.tasks.html_tasks"]
+celery_app.conf.include = ["app.tasks.tasks"]
 # or:
 # celery_app.autodiscover_tasks(["app.tasks"])
 

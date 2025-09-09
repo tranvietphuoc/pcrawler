@@ -307,21 +307,17 @@ class ListCrawler(BaseCrawler):
                         )
                         context = await browser.new_context()
                         page = await context.new_page()
-                        try:
-                            await page.goto(
-                                page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
-                            )
-                            await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
-                            locs = await page.locator(self.config.get_xpath("company_links")).all()
-                            return [
-                                await a.get_attribute("href")
-                                for a in locs
-                                if await a.get_attribute("href")
-                            ]
-                        finally:
-                            await page.close()
-                            await context.close()
-                            await browser.close()
+                        await page.goto(
+                            page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
+                        )
+                        await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+                        locs = await page.locator(self.config.get_xpath("company_links")).all()
+                        return [
+                            await a.get_attribute("href")
+                            for a in locs
+                            if await a.get_attribute("href")
+                        ]
+                        # Note: page, context, browser are closed automatically by Async Context Manager
                 except Exception:
                     if i == self.max_retries - 1:
                         return []
@@ -346,8 +342,7 @@ class ListCrawler(BaseCrawler):
         self, base_url: str, industry_value: str, industry_name: str
     ):
         """
-        KHÁC TRƯỚC: không dựa vào ?career_category_id=... nữa.
-        Thay vào đó: mở trang -> chọn ngành theo *tên* -> bấm nút 'btn-company' để apply filter,
+        mở trang -> chọn ngành theo *tên* -> bấm nút 'btn-company' để apply filter,
         rồi dùng URL sau filter để phân trang và gom link.
         """
         # Use Async Context Manager for automatic cleanup

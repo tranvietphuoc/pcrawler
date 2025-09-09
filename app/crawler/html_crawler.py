@@ -194,49 +194,50 @@ class HTMLCrawler(BaseCrawler):
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
         
-        crawler = await self._get_crawler()
-        
-        try:
-            # Crawl Facebook page với auto close login
-            result = await crawler.arun(
-                url=url,
-                js_code="""
-                    // Auto close login popup nếu có
-                    setTimeout(() => {
-                        // Tìm và click close button
-                        const closeButtons = document.querySelectorAll('[aria-label="Close"], [aria-label="Đóng"], .close, .x');
-                        for (let btn of closeButtons) {
-                            if (btn.offsetParent !== null) { // Visible
-                                btn.click();
-                                break;
+        # Use Async Context Manager for Crawl4AI crawler
+        user_agent = await self._get_random_user_agent()
+        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent) as crawler:
+            try:
+                # Crawl Facebook page với auto close login
+                result = await crawler.arun(
+                    url=url,
+                    js_code="""
+                        // Auto close login popup nếu có
+                        setTimeout(() => {
+                            // Tìm và click close button
+                            const closeButtons = document.querySelectorAll('[aria-label="Close"], [aria-label="Đóng"], .close, .x');
+                            for (let btn of closeButtons) {
+                                if (btn.offsetParent !== null) { // Visible
+                                    btn.click();
+                                    break;
+                                }
                             }
-                        }
-                        
-                        // Tìm và click "Not Now" button
-                        const notNowButtons = document.querySelectorAll('[aria-label="Not Now"], [aria-label="Không phải bây giờ"]');
-                        for (let btn of notNowButtons) {
-                            if (btn.offsetParent !== null) { // Visible
-                                btn.click();
-                                break;
+                            
+                            // Tìm và click "Not Now" button
+                            const notNowButtons = document.querySelectorAll('[aria-label="Not Now"], [aria-label="Không phải bây giờ"]');
+                            for (let btn of notNowButtons) {
+                                if (btn.offsetParent !== null) { // Visible
+                                    btn.click();
+                                    break;
+                                }
                             }
-                        }
-                    }, 2000);
-                """,
-                wait_for="networkidle"
-            )
-            
-            html_content = getattr(result, "html", None) or getattr(result, "content", None) or str(result)
-            
-            if html_content and len(html_content) > 100:  # Valid HTML content
-                # Store to database
-                record_id = self.db_manager.store_contact_html(company_name, url, 'facebook', html_content)
-                logger.info(f"Stored Facebook HTML for {company_name}: {url} (ID: {record_id})")
-                return True
-            else:
-                logger.warning(f"Invalid Facebook HTML content for {company_name}: {url}")
-                return False
+                        }, 2000);
+                    """,
+                    wait_for="networkidle"
+                )
                 
-        except Exception as e:
-            logger.error(f"Failed to crawl Facebook page for {company_name}: {url} - {e}")
-            return False
+                html_content = getattr(result, "html", None) or getattr(result, "content", None) or str(result)
+                
+                if html_content and len(html_content) > 100:  # Valid HTML content
+                    # Store to database
+                    record_id = self.db_manager.store_contact_html(company_name, url, 'facebook', html_content)
+                    logger.info(f"Stored Facebook HTML for {company_name}: {url} (ID: {record_id})")
+                    return True
+                else:
+                    logger.warning(f"Invalid Facebook HTML content for {company_name}: {url}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Failed to crawl Facebook page for {company_name}: {url} - {e}")
+                return False
     

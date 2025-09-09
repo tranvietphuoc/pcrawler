@@ -14,11 +14,7 @@ class ContactDBCrawler:
         self.db_manager = DatabaseManager()
         self.crawler = None
         
-    async def _get_crawler(self):
-        """Lazy initialization của crawler"""
-        if not self.crawler:
-            self.crawler = AsyncWebCrawler()
-        return self.crawler
+    # Removed _get_crawler() - now using Async Context Manager directly
     
     async def crawl_contact_page(self, url: str, company_name: str, url_type: str) -> bool:
         """Crawl contact page và lưu HTML vào database"""
@@ -28,57 +24,58 @@ class ContactDBCrawler:
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
         
-        crawler = await self._get_crawler()
-        
-        try:
-            # Thêm init_script cho Facebook
-            init_script = None
-            if url_type == "facebook":
-                init_script = """
-                    // Auto-close Facebook login popup
-                    const closePopup = () => {
-                        const closeBtn = document.querySelector('[aria-label="Close"], .x1n2onr6.x1ja2u2z, [data-testid="close-button"]');
-                        if (closeBtn) {
-                            closeBtn.click();
-                            console.log('Closed Facebook login popup');
-                        }
+        # Use Async Context Manager for Crawl4AI crawler
+        user_agent = await self._get_random_user_agent()
+        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent) as crawler:
+            try:
+                # Thêm init_script cho Facebook
+                init_script = None
+                if url_type == "facebook":
+                    init_script = """
+                        // Auto-close Facebook login popup
+                        const closePopup = () => {
+                            const closeBtn = document.querySelector('[aria-label="Close"], .x1n2onr6.x1ja2u2z, [data-testid="close-button"]');
+                            if (closeBtn) {
+                                closeBtn.click();
+                                console.log('Closed Facebook login popup');
+                            }
+                            
+                            const popup = document.querySelector('[role="dialog"], .x1n2onr6.x1ja2u2z');
+                            if (popup) {
+                                popup.remove();
+                                console.log('Removed Facebook popup');
+                            }
+                        };
                         
-                        const popup = document.querySelector('[role="dialog"], .x1n2onr6.x1ja2u2z');
-                        if (popup) {
-                            popup.remove();
-                            console.log('Removed Facebook popup');
-                        }
-                    };
-                    
-                    closePopup();
-                    setTimeout(closePopup, 2000);
-                    
-                    const observer = new MutationObserver(() => {
                         closePopup();
-                    });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                """
-            
-            # Crawl HTML content
-            if init_script:
-                result = await crawler.arun(url=url, init_script=init_script)
-            else:
-                result = await crawler.arun(url=url)
+                        setTimeout(closePopup, 2000);
+                        
+                        const observer = new MutationObserver(() => {
+                            closePopup();
+                        });
+                        observer.observe(document.body, { childList: true, subtree: true });
+                    """
                 
-            html_content = getattr(result, "html", None) or getattr(result, "content", None) or str(result)
-            
-            if html_content and len(html_content) > 100:  # Valid HTML content
-                # Store to database
-                record_id = self.db_manager.store_contact_html(company_name, url, url_type, html_content)
-                logger.info(f"Stored contact HTML for {company_name}: {url} ({url_type}) (ID: {record_id})")
-                return True
-            else:
-                logger.warning(f"Invalid HTML content for {company_name}: {url}")
+                # Crawl HTML content
+                if init_script:
+                    result = await crawler.arun(url=url, init_script=init_script)
+                else:
+                    result = await crawler.arun(url=url)
+                    
+                html_content = getattr(result, "html", None) or getattr(result, "content", None) or str(result)
+                
+                if html_content and len(html_content) > 100:  # Valid HTML content
+                    # Store to database
+                    record_id = self.db_manager.store_contact_html(company_name, url, url_type, html_content)
+                    logger.info(f"Stored contact HTML for {company_name}: {url} ({url_type}) (ID: {record_id})")
+                    return True
+                else:
+                    logger.warning(f"Invalid HTML content for {company_name}: {url}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Failed to crawl contact page for {company_name}: {url} - {e}")
                 return False
-                
-        except Exception as e:
-            logger.error(f"Failed to crawl contact page for {company_name}: {url} - {e}")
-            return False
     
     async def crawl_batch(self, companies: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Crawl contact pages cho một batch companies"""
@@ -127,14 +124,3 @@ class ContactDBCrawler:
         
         return results
     
-    def cleanup(self):
-        """Cleanup crawler resources"""
-        if self.crawler:
-            try:
-                # Note: AsyncWebCrawler.close() is async, but this method is sync
-                # In real implementation, you'd need to handle this properly
-                pass
-            except Exception as e:
-                logger.error(f"Error cleaning up contact crawler: {e}")
-            finally:
-                self.crawler = None
