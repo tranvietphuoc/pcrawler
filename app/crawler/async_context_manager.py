@@ -47,6 +47,7 @@ class AsyncBrowserContextManager:
             # Process isolation settings
             self._worker_browser_pool = {}  # Separate browser pool per worker
             self._worker_memory_tracker = {}  # Memory tracking per worker
+            self._restart_suspended: Dict[str, bool] = {}  # Suspend restarts per worker
             
             self._initialized = True
             logger.info(f"AsyncBrowserContextManager initialized for worker {self._worker_id} (PID: {self._process_id})")
@@ -95,8 +96,8 @@ class AsyncBrowserContextManager:
         """Get or create browser with process isolation and memory monitoring"""
         worker_key = f"{self._worker_id}_{crawler_id}"
         
-        # Check if we need to restart due to memory pressure
-        if await self._check_memory_pressure():
+        # Check if we need to restart due to memory pressure (skip if suspended)
+        if not self._restart_suspended.get(self._worker_id, False) and await self._check_memory_pressure():
             logger.warning(f"Memory pressure detected, restarting all browsers for worker {self._worker_id}")
             await self._restart_all_worker_browsers()
             await self._force_garbage_collection()
@@ -109,7 +110,7 @@ class AsyncBrowserContextManager:
                 await browser.version()
                 
                 # Check browser memory usage
-                if worker_key in self._memory_usage:
+                if not self._restart_suspended.get(self._worker_id, False) and worker_key in self._memory_usage:
                     memory_mb = self._memory_usage[worker_key]
                     if memory_mb > self._memory_threshold_mb:
                         logger.warning(f"Browser {worker_key} memory usage too high: {memory_mb:.1f}MB")
@@ -224,6 +225,17 @@ class AsyncBrowserContextManager:
             
         except Exception as e:
             logger.warning(f"Error restarting all browsers for worker {self._worker_id}: {e}")
+
+    # Public API to control restart policy around critical batches
+    async def suspend_restarts(self):
+        """Prevent automatic restarts for this worker until resumed."""
+        self._restart_suspended[self._worker_id] = True
+        logger.info(f"Browser restarts suspended for worker {self._worker_id}")
+
+    async def resume_restarts(self):
+        """Allow automatic restarts again for this worker."""
+        self._restart_suspended[self._worker_id] = False
+        logger.info(f"Browser restarts resumed for worker {self._worker_id}")
     
     @asynccontextmanager
     async def get_playwright_context(self, crawler_id: str, user_agent: str, viewport: dict):
@@ -245,7 +257,7 @@ class AsyncBrowserContextManager:
                 worker_key = f"{self._worker_id}_{crawler_id}"
                 if worker_key in self._request_counts:
                     self._request_counts[worker_key] += 1
-                    if self._request_counts[worker_key] > self._browser_restart_threshold:
+                    if (not self._restart_suspended.get(self._worker_id, False)) and (self._request_counts[worker_key] > self._browser_restart_threshold):
                         logger.info(f"Restarting browser for worker {self._worker_id} after {self._request_counts[worker_key]} requests")
                         await self._restart_browser(worker_key)
                         browser = await self._get_or_create_browser(crawler_id)

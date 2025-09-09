@@ -3,7 +3,6 @@ from typing import List, Tuple
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
 from .base_crawler import BaseCrawler
-from .browser_defender import BrowserDefender
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -56,27 +55,16 @@ class ListCrawler(BaseCrawler):
         """Safely wait for networkidle with fallback to domcontentloaded"""
         if timeout is None:
             timeout = self.config.processing_config["network_timeout"]
-        
-        # Use BrowserDefender to prevent TargetClosedError
-        async def network_operation():
-            try:
-                await page.wait_for_load_state("networkidle", timeout=timeout)
-            except Exception as network_error:
-                error_str = str(network_error)
-                if "Target page, context or browser has been closed" in error_str or "TargetClosedError" in error_str:
-                    logger.warning(f"Networkidle failed due to browser closure: {network_error}")
-                    raise  # Re-raise to trigger browser restart
-                else:
-                    logger.warning(f"Networkidle timeout, falling back to domcontentloaded: {network_error}")
-                    await page.wait_for_load_state("domcontentloaded", timeout=10000)
-        
-        await BrowserDefender.safe_page_operation(
-            page, 
-            network_operation, 
-            "wait_for_network", 
-            max_retries=1, 
-            timeout=timeout + 10000
-        )
+        try:
+            await page.wait_for_load_state("networkidle", timeout=timeout)
+        except Exception as network_error:
+            error_str = str(network_error)
+            if "Target page, context or browser has been closed" in error_str or "TargetClosedError" in error_str:
+                logger.warning(f"Networkidle failed due to browser closure: {network_error}")
+                raise
+            else:
+                logger.warning(f"Networkidle timeout, falling back to domcontentloaded: {network_error}")
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
 
     async def _wait_for_select2_ready(self, page, max_wait: int = None) -> bool:
         """Đợi Select2 dropdown sẵn sàng với timeout adaptive"""
@@ -180,17 +168,7 @@ class ListCrawler(BaseCrawler):
                         
                         logger.info(f"Loading page with timeout={timeout}ms, network_timeout={network_timeout}ms")
                         
-                        # Use BrowserDefender to prevent TargetClosedError
-                        async def goto_operation():
-                            await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
-                        
-                        await BrowserDefender.safe_page_operation(
-                            page, 
-                            goto_operation, 
-                            "page_goto_main", 
-                            max_retries=2, 
-                            timeout=timeout + 10000
-                        )
+                        await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
                         
                         logger.info("Page loaded, waiting for network idle...")
                         await self._wait_for_network(page, network_timeout)
@@ -413,40 +391,99 @@ class ListCrawler(BaseCrawler):
                 # Lấy tổng số trang ngay trên trang hiện tại
                 total = await self._get_total_pages_current(page)
 
-                # Tạo danh sách URL các trang đã lọc
-                page_urls = [self._build_page_url(filtered_url, i) for i in range(1, total + 1)]
+                # Tạo danh sách URL các trang đã lọc (ước lượng ban đầu)
+                page_urls = [self._build_page_url(filtered_url, i) for i in range(1, max(total, 1) + 1)]
 
             except Exception as e:
                 logger.error(f"Error in get_company_links_for_industry: {e}")
                 raise
             # Context and page are automatically closed here
 
-        # Gom link "tổng quan" tuần tự theo từng trang - KHÔNG reuse page
-        # Tối ưu hóa cho industries có nhiều companies
+        # Gom link song song: 1 browser/worker, tạo nhiều context/page song song qua context_manager
         seen, uniq = set(), []
-        batch_size = 5  # Xử lý 5 trang một lúc để giảm memory pressure
-        
-        for i in range(0, len(page_urls), batch_size):
-            batch_urls = page_urls[i:i + batch_size]
-            logger.info(f"Processing batch {i//batch_size + 1}/{(len(page_urls) + batch_size - 1)//batch_size} for industry {industry_name}")
-            
-            for page_url in batch_urls:
+
+        concurrency = 6  # 32GB: 6 context song song
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def fetch_with_context(url: str) -> List[str]:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                user_agent = await self._get_random_user_agent()
+                viewport = await self._get_random_viewport()
                 try:
-                    # Random delay between pages
-                    await asyncio.sleep(random.uniform(1, 2))
-                    
-                    links = await self.get_company_links_for_page(page_url, None)  # Không reuse page
-                    if isinstance(links, list):
-                        for link in links:
-                            if link and link not in seen:
-                                seen.add(link)
-                                uniq.append(link)
+                    async with self.context_manager.get_playwright_context(self.crawler_id, user_agent, viewport) as (context, page):
+                        page.set_default_timeout(25000)
+                        try:
+                            await page.goto(url, timeout=20000, wait_until="domcontentloaded")
+                        except Exception as goto_error:
+                            if "TargetClosedError" in str(goto_error) or "has been closed" in str(goto_error):
+                                raise
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=15000)
+                        except Exception:
+                            try:
+                                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                            except Exception:
+                                pass
+                        locs = await page.locator(self.config.get_xpath("company_links")).all()
+                        links = []
+                        for a in locs:
+                            try:
+                                href = await a.get_attribute("href")
+                                if href:
+                                    links.append(href)
+                            except Exception:
+                                continue
+                        return links
                 except Exception as e:
-                    print(f"[ERROR] Failed to crawl page {page_url}: {e}")
-                    continue
-            
-            # Force garbage collection sau mỗi batch để giảm memory
-            import gc
-            gc.collect()
+                    msg = str(e)
+                    if attempt < max_attempts - 1 and ("TargetClosedError" in msg or "has been closed" in msg or "Timeout" in msg):
+                        await asyncio.sleep(1.0 * (attempt + 1))
+                        continue
+                    return []
+
+        async def worker(url: str):
+            async with semaphore:
+                links = await fetch_with_context(url)
+                if links:
+                    for link in links:
+                        if link and link not in seen:
+                            seen.add(link)
+                            uniq.append(link)
+
+        # Suspend auto restarts trong batch để không đóng browser khi đang chạy
+        await self.context_manager.suspend_restarts()
+        try:
+            # 1) Chạy batch đầu theo tổng trang ước lượng
+            tasks = [asyncio.create_task(worker(u)) for u in page_urls]
+            completed = 0
+            for coro in asyncio.as_completed(tasks):
+                await coro
+                completed += 1
+                if completed % 10 == 0 or completed == len(tasks):
+                    logger.info(f"Collected pages (est): {completed}/{len(tasks)} | unique: {len(uniq)} | industry: {industry_name}")
+
+            # 2) Mở rộng phân trang cho đến khi thật sự hết
+            # Quy tắc dừng: gặp 2 trang liên tiếp không thêm link mới
+            consecutive_empty = 0
+            current_page = len(page_urls) + 1
+            while consecutive_empty < 2:
+                url = self._build_page_url(filtered_url, current_page)
+                before_count = len(uniq)
+                await worker(url)
+                added = len(uniq) - before_count
+                if added == 0:
+                    consecutive_empty += 1
+                else:
+                    consecutive_empty = 0
+                if current_page % 10 == 0:
+                    logger.info(f"Extended scan p{current_page}, unique: {len(uniq)} | empty_streak: {consecutive_empty}")
+                current_page += 1
+        finally:
+            await self.context_manager.resume_restarts()
+
+        import gc
+        gc.collect()
+
         return uniq
     
