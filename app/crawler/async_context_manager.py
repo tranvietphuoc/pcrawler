@@ -38,11 +38,11 @@ class AsyncBrowserContextManager:
             self._process_id = os.getpid()
             
             # Enhanced resource limits with process isolation
-            self._max_contexts_per_worker = 3  # Reduced for better isolation
-            self._browser_restart_threshold = 30  # More aggressive restart
-            self._context_lifetime = 120  # Shorter lifetime
-            self._memory_threshold_mb = 500  # Memory limit per browser
-            self._max_memory_per_worker_mb = 1000  # Total memory limit per worker
+            self._max_contexts_per_worker = 2  # Further reduced for better isolation
+            self._browser_restart_threshold = 20  # Even more aggressive restart
+            self._context_lifetime = 90  # Even shorter lifetime
+            self._memory_threshold_mb = 400  # Lower memory limit per browser
+            self._max_memory_per_worker_mb = 800  # Lower total memory limit per worker
             
             # Process isolation settings
             self._worker_browser_pool = {}  # Separate browser pool per worker
@@ -136,6 +136,7 @@ class AsyncBrowserContextManager:
             # Enhanced browser arguments for stability and memory efficiency
             browser = await playwright.chromium.launch(
                 headless=True,
+                timeout=60000,  # 60 second timeout for browser launch
                 args=[
                     # Essential stability
                     "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
@@ -268,7 +269,7 @@ class AsyncBrowserContextManager:
                                     'Upgrade-Insecure-Requests': '1',
                                 }
                             ),
-                            timeout=30
+                            timeout=60
                         )
                         break
                     except asyncio.TimeoutError:
@@ -290,7 +291,7 @@ class AsyncBrowserContextManager:
                     try:
                         page = await asyncio.wait_for(
                             context.new_page(),
-                            timeout=15
+                            timeout=30
                         )
                         break
                     except asyncio.TimeoutError:
