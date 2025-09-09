@@ -334,7 +334,7 @@ class ListCrawler(BaseCrawler):
                         context = await browser.new_context()
                         page = await context.new_page()
                         # Tăng timeout cho từng trang để tránh bị stuck
-                        page_timeout = min(self.config.processing_config["timeout"], 120000)  # Max 2 phút per page
+                        page_timeout = min(self.config.processing_config["timeout"], 300000)  # Max 5 phút per page
                         await page.goto(
                             page_url, timeout=page_timeout, wait_until="domcontentloaded"
                         )
@@ -404,7 +404,7 @@ class ListCrawler(BaseCrawler):
         # Gom link song song: 1 browser/worker, tạo nhiều context/page song song qua context_manager
         seen, uniq = set(), []
 
-        concurrency = 6  # 32GB: 6 context song song
+        concurrency = 3  # Giảm concurrency để tránh overload server
         semaphore = asyncio.Semaphore(concurrency)
 
         async def fetch_with_context(url: str) -> List[str]:
@@ -414,17 +414,17 @@ class ListCrawler(BaseCrawler):
                 viewport = await self._get_random_viewport()
                 try:
                     async with self.context_manager.get_playwright_context(self.crawler_id, user_agent, viewport) as (context, page):
-                        page.set_default_timeout(120000)  # Tăng timeout lên 2 phút
+                        page.set_default_timeout(300000)  # Tăng timeout lên 5 phút
                         try:
-                            await page.goto(url, timeout=60000, wait_until="domcontentloaded")  # Tăng timeout lên 1 phút
+                            await page.goto(url, timeout=180000, wait_until="domcontentloaded")  # Tăng timeout lên 3 phút
                         except Exception as goto_error:
                             if "TargetClosedError" in str(goto_error) or "has been closed" in str(goto_error):
                                 raise
                         try:
-                            await page.wait_for_load_state("networkidle", timeout=30000)  # Tăng timeout lên 30s
+                            await page.wait_for_load_state("networkidle", timeout=60000)  # Tăng timeout lên 1 phút
                         except Exception:
                             try:
-                                await page.wait_for_load_state("domcontentloaded", timeout=10000)  # Tăng timeout lên 10s
+                                await page.wait_for_load_state("domcontentloaded", timeout=30000)  # Tăng timeout lên 30s
                             except Exception:
                                 pass
                         locs = await page.locator(self.config.get_xpath("company_links")).all()
@@ -446,6 +446,8 @@ class ListCrawler(BaseCrawler):
 
         async def worker(url: str):
             async with semaphore:
+                # Thêm delay để tránh rate limiting
+                await asyncio.sleep(random.uniform(1, 3))
                 links = await fetch_with_context(url)
                 if links:
                     for link in links:
