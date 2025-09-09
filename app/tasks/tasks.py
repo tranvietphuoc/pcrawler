@@ -67,9 +67,9 @@ async def _fetch_links_with_retry_async(list_crawler, base_url: str, industry_id
     """Async helper for link fetching with retry logic"""
     # Adaptive retries/timeouts per pass - tối ưu cho large industries
     if pass_no == 1:
-        retries, timeout_s, delay_s = 3, 90, 2  # Giảm từ 120s xuống 90s
+        retries, timeout_s, delay_s = 3, 60, 2  # Giảm từ 90s xuống 60s để tránh browser timeout
     else:
-        retries, timeout_s, delay_s = 3, 120, 3  # Giảm từ 180s xuống 120s
+        retries, timeout_s, delay_s = 3, 90, 3  # Giảm từ 120s xuống 90s để tránh browser timeout
     
     for attempt in range(retries + 1):
         try:

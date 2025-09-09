@@ -54,8 +54,8 @@ processing:
   batch_delay: [4, 8]  # Giảm từ [6,12] xuống [4,8]
   # session_delay: [12, 25] (cũ)
   session_delay: [8, 15]  # Giảm từ [12,25] xuống [8,15]
-  timeout: 120000  # Tăng từ 90s lên 120s cho industry lớn
-  network_timeout: 90000  # Tăng từ 60s lên 90s
+  timeout: 90000  # Giảm từ 120s xuống 90s để tránh browser timeout
+  network_timeout: 60000  # Giảm từ 90s xuống 60s để tránh browser đóng
   # page_load_wait: 2000 (cũ)
   page_load_wait: 1500  # Giảm từ 2000 xuống 1500
   # js_load_wait: 3000 (cũ)

@@ -39,8 +39,8 @@ class AsyncBrowserContextManager:
             
             # Enhanced resource limits with process isolation
             self._max_contexts_per_worker = 2  # Further reduced for better isolation
-            self._browser_restart_threshold = 20  # Even more aggressive restart
-            self._context_lifetime = 90  # Even shorter lifetime
+            self._browser_restart_threshold = 50  # Less aggressive restart to avoid conflicts
+            self._context_lifetime = 180  # Longer lifetime to avoid premature closure
             self._memory_threshold_mb = 400  # Lower memory limit per browser
             self._max_memory_per_worker_mb = 800  # Lower total memory limit per worker
             
