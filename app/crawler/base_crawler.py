@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from crawl4ai import AsyncWebCrawler
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
-from .async_context_manager import get_global_context_manager
+from .async_context_manager import context_manager
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class BaseCrawler:
         self.config = config or CrawlerConfig()
         
         # Async context manager
-        self.context_manager = get_global_context_manager()
+        self.context_manager = context_manager
         self.crawler_id = f"{self.__class__.__name__}_{id(self)}"
         
         # Request tracking

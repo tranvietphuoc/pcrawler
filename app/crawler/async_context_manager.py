@@ -1,106 +1,304 @@
 import asyncio
 import logging
+import psutil
+import gc
+import os
 import time
-from typing import Dict, List, Optional, AsyncContextManager
 from contextlib import asynccontextmanager
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from typing import Dict, Optional, Any
+from playwright.async_api import async_playwright
 from crawl4ai import AsyncWebCrawler
 
 logger = logging.getLogger(__name__)
 
 class AsyncBrowserContextManager:
-    """Async context manager for browser resources with proper lifecycle management"""
+    """
+    Enhanced async context manager for browser instances with process isolation,
+    memory monitoring, and enhanced error recovery.
+    """
+    _instance = None
+    _lock = asyncio.Lock()
     
-    def __init__(self, max_browsers: int = 4, max_contexts_per_browser: int = 3):
-        self._browsers: Dict[str, Browser] = {}
-        self._contexts: Dict[str, List[BrowserContext]] = {}
-        self._crawl4ai_crawlers: Dict[str, AsyncWebCrawler] = {}
-        self._active_contexts: Dict[str, int] = {}  # Track active contexts per browser
-        self._request_counts: Dict[str, int] = {}  # Track requests per browser
-        self._max_browsers = max_browsers
-        self._max_contexts_per_browser = max_contexts_per_browser
-        self._lock = asyncio.Lock()
-        self._context_lifetime = 300  # seconds - tăng lên 5 phút để contexts sống lâu hơn
-        self._browser_restart_threshold = 200  # restart browser sau 200 requests - tăng để ít restart hơn
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
     
-    async def _is_context_healthy(self, context) -> bool:
-        """Check if context is still healthy and usable"""
+    def __init__(self):
+        if not self._initialized:
+            self._browsers: Dict[str, Any] = {}
+            self._active_contexts: Dict[str, int] = {}
+            self._request_counts: Dict[str, int] = {}
+            self._last_restart: Dict[str, float] = {}
+            self._memory_usage: Dict[str, float] = {}
+            self._worker_id = os.getenv('CELERY_WORKER_ID', 'default')
+            self._process_id = os.getpid()
+            
+            # Enhanced resource limits with process isolation
+            self._max_contexts_per_worker = 3  # Reduced for better isolation
+            self._browser_restart_threshold = 30  # More aggressive restart
+            self._context_lifetime = 120  # Shorter lifetime
+            self._memory_threshold_mb = 500  # Memory limit per browser
+            self._max_memory_per_worker_mb = 1000  # Total memory limit per worker
+            
+            # Process isolation settings
+            self._worker_browser_pool = {}  # Separate browser pool per worker
+            self._worker_memory_tracker = {}  # Memory tracking per worker
+            
+            self._initialized = True
+            logger.info(f"AsyncBrowserContextManager initialized for worker {self._worker_id} (PID: {self._process_id})")
+    
+    async def _get_worker_memory_usage(self) -> float:
+        """Get current memory usage for this worker process"""
         try:
-            # Check if context is still connected without creating new page
-            if hasattr(context, '_connection') and context._connection:
-                # Try to get existing pages count as a health check
-                pages = context.pages
-                return len(pages) >= 0  # Just check if we can access pages
+            process = psutil.Process(self._process_id)
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            return memory_mb
+        except Exception as e:
+            logger.warning(f"Failed to get memory usage: {e}")
+            return 0.0
+    
+    async def _check_memory_pressure(self) -> bool:
+        """Check if worker is under memory pressure"""
+        try:
+            memory_mb = await self._get_worker_memory_usage()
+            self._worker_memory_tracker[self._worker_id] = memory_mb
+            
+            if memory_mb > self._max_memory_per_worker_mb:
+                logger.warning(f"Worker {self._worker_id} memory pressure: {memory_mb:.1f}MB > {self._max_memory_per_worker_mb}MB")
+                return True
+            
+            # Check system memory
+            system_memory = psutil.virtual_memory()
+            if system_memory.percent > 85:
+                logger.warning(f"System memory pressure: {system_memory.percent}%")
+                return True
+                
             return False
         except Exception as e:
-            logger.debug(f"Context health check failed: {e}")
+            logger.warning(f"Memory check failed: {e}")
             return False
-
+    
+    async def _force_garbage_collection(self):
+        """Force garbage collection to free memory"""
+        try:
+            gc.collect()
+            await asyncio.sleep(0.1)  # Allow GC to complete
+            logger.debug(f"Garbage collection completed for worker {self._worker_id}")
+        except Exception as e:
+            logger.warning(f"Garbage collection failed: {e}")
+    
+    async def _get_or_create_browser(self, crawler_id: str):
+        """Get or create browser with process isolation and memory monitoring"""
+        worker_key = f"{self._worker_id}_{crawler_id}"
+        
+        # Check if we need to restart due to memory pressure
+        if await self._check_memory_pressure():
+            logger.warning(f"Memory pressure detected, restarting all browsers for worker {self._worker_id}")
+            await self._restart_all_worker_browsers()
+            await self._force_garbage_collection()
+        
+        # Check if browser exists and is healthy
+        if worker_key in self._worker_browser_pool:
+            browser = self._worker_browser_pool[worker_key]
+            try:
+                # Enhanced health check
+                await browser.version()
+                
+                # Check browser memory usage
+                if worker_key in self._memory_usage:
+                    memory_mb = self._memory_usage[worker_key]
+                    if memory_mb > self._memory_threshold_mb:
+                        logger.warning(f"Browser {worker_key} memory usage too high: {memory_mb:.1f}MB")
+                        await self._restart_browser(worker_key)
+                        browser = await self._create_new_browser(worker_key)
+                        self._worker_browser_pool[worker_key] = browser
+                        return browser
+                
+                return browser
+            except Exception as e:
+                logger.warning(f"Browser {worker_key} health check failed: {e}")
+                await self._restart_browser(worker_key)
+        
+        # Create new browser
+        browser = await self._create_new_browser(worker_key)
+        self._worker_browser_pool[worker_key] = browser
+        return browser
+    
+    async def _create_new_browser(self, worker_key: str):
+        """Create new browser with optimized settings"""
+        try:
+            playwright = await async_playwright().start()
+            
+            # Enhanced browser arguments for stability and memory efficiency
+            browser = await playwright.chromium.launch(
+                headless=True,
+                args=[
+                    # Essential stability
+                    "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+                    
+                    # Memory optimization
+                    "--memory-pressure-off", "--max_old_space_size=1024", "--disable-gpu",
+                    "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding", "--disable-background-networking",
+                    
+                    # Feature disabling for performance
+                    "--disable-extensions", "--disable-default-apps", "--disable-sync",
+                    "--disable-translate", "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+                    "--disable-component-extensions-with-background-pages", "--disable-plugins-discovery",
+                    "--disable-permissions-api", "--disable-presentation-api", "--disable-shared-workers",
+                    "--disable-webgl", "--disable-webgl2",
+                    
+                    # Security and detection
+                    "--disable-web-security", "--disable-client-side-phishing-detection",
+                    "--disable-blink-features=AutomationControlled",
+                    
+                    # UI and audio
+                    "--hide-scrollbars", "--mute-audio", "--no-first-run",
+                    
+                    # Logging and debugging
+                    "--disable-logging", "--disable-gpu-logging", "--silent", "--log-level=3",
+                    "--disable-crash-reporter", "--disable-in-process-stack-traces", "--disable-dev-tools",
+                    
+                    # Network and connectivity
+                    "--disable-preconnect", "--disable-remote-fonts", "--disable-domain-reliability",
+                    "--disable-component-update", "--no-report-upload",
+                    
+                    # System integration
+                    "--use-mock-keychain", "--force-color-profile=srgb", "--metrics-recording-only",
+                    
+                    # Process management
+                    "--no-zygote", "--disable-hang-monitor", "--disable-prompt-on-repost",
+                    "--disable-xss-auditor", "--disable-breakpad",
+                    
+                    # Process isolation
+                    f"--user-data-dir=/tmp/playwright_{self._worker_id}_{worker_key}",
+                    f"--remote-debugging-port={9000 + hash(worker_key) % 1000}"
+                ]
+            )
+            
+            # Track browser creation
+            self._last_restart[worker_key] = time.time()
+            self._memory_usage[worker_key] = 0.0
+            
+            logger.info(f"Created new browser for worker {self._worker_id} with key {worker_key}")
+            return browser
+            
+        except Exception as e:
+            logger.error(f"Failed to create browser for worker {self._worker_id}: {e}")
+            raise
+    
+    async def _restart_browser(self, worker_key: str):
+        """Restart browser with proper cleanup"""
+        try:
+            if worker_key in self._worker_browser_pool:
+                browser = self._worker_browser_pool[worker_key]
+                await browser.close()
+                del self._worker_browser_pool[worker_key]
+            
+            if worker_key in self._memory_usage:
+                del self._memory_usage[worker_key]
+            
+            if worker_key in self._last_restart:
+                del self._last_restart[worker_key]
+            
+            # Force garbage collection
+            await self._force_garbage_collection()
+            
+            logger.info(f"Restarted browser for worker {self._worker_id} with key {worker_key}")
+            
+        except Exception as e:
+            logger.warning(f"Error restarting browser for worker {self._worker_id}: {e}")
+    
+    async def _restart_all_worker_browsers(self):
+        """Restart all browsers for current worker"""
+        try:
+            worker_keys = [key for key in self._worker_browser_pool.keys() if key.startswith(self._worker_id)]
+            for worker_key in worker_keys:
+                await self._restart_browser(worker_key)
+            
+            logger.info(f"Restarted all browsers for worker {self._worker_id}")
+            
+        except Exception as e:
+            logger.warning(f"Error restarting all browsers for worker {self._worker_id}: {e}")
+    
     @asynccontextmanager
     async def get_playwright_context(self, crawler_id: str, user_agent: str, viewport: dict):
-        """Async context manager for Playwright context with automatic cleanup and health check"""
+        """Enhanced playwright context with process isolation and memory monitoring"""
         context = None
         page = None
         
         try:
             async with self._lock:
-                # Get or create browser
+                # Check worker memory pressure
+                if await self._check_memory_pressure():
+                    logger.warning(f"Memory pressure detected, forcing browser restart for worker {self._worker_id}")
+                    await self._restart_all_worker_browsers()
+                
+                # Get browser with process isolation
                 browser = await self._get_or_create_browser(crawler_id)
                 
-                # Check if browser needs restart
-                if crawler_id in self._request_counts:
-                    self._request_counts[crawler_id] += 1
-                    if self._request_counts[crawler_id] > self._browser_restart_threshold:
-                        logger.info(f"Restarting browser for {crawler_id} after {self._request_counts[crawler_id]} requests")
-                        await self._restart_browser(crawler_id)
+                # Check if we need to restart browser based on request count
+                worker_key = f"{self._worker_id}_{crawler_id}"
+                if worker_key in self._request_counts:
+                    self._request_counts[worker_key] += 1
+                    if self._request_counts[worker_key] > self._browser_restart_threshold:
+                        logger.info(f"Restarting browser for worker {self._worker_id} after {self._request_counts[worker_key]} requests")
+                        await self._restart_browser(worker_key)
                         browser = await self._get_or_create_browser(crawler_id)
-                        self._request_counts[crawler_id] = 0
+                        self._request_counts[worker_key] = 0
                 else:
-                    self._request_counts[crawler_id] = 1
+                    self._request_counts[worker_key] = 1
                 
-                # Create new context
-                # Create context with retry logic
+                # Create context with retry logic and timeout
                 context = None
                 for attempt in range(3):
                     try:
-                        context = await browser.new_context(
-                            user_agent=user_agent,
-                            viewport=viewport,
-                            extra_http_headers={
-                                'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
-                                'Accept-Encoding': 'gzip, deflate, br',
-                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                                'Connection': 'keep-alive',
-                                'Upgrade-Insecure-Requests': '1',
-                            }
+                        context = await asyncio.wait_for(
+                            browser.new_context(
+                                user_agent=user_agent,
+                                viewport=viewport,
+                                extra_http_headers={
+                                    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+                                    'Accept-Encoding': 'gzip, deflate, br',
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                                    'Connection': 'keep-alive',
+                                    'Upgrade-Insecure-Requests': '1',
+                                }
+                            ),
+                            timeout=30
                         )
                         break
-                    except Exception as e:
-                        logger.warning(f"Failed to create context for {crawler_id} (attempt {attempt + 1}/3): {e}")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Context creation timeout for worker {self._worker_id} (attempt {attempt + 1}/3)")
                         if attempt < 2:
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(2)
+                        else:
+                            raise Exception("Context creation timeout after 3 attempts")
+                    except Exception as e:
+                        logger.warning(f"Failed to create context for worker {self._worker_id} (attempt {attempt + 1}/3): {e}")
+                        if attempt < 2:
+                            await asyncio.sleep(2)
                         else:
                             raise
                 
-                # Track active context
-                self._active_contexts[crawler_id] = self._active_contexts.get(crawler_id, 0) + 1
-                
-                # Create page with retry logic
+                # Create page with retry logic and timeout
                 page = None
                 for attempt in range(3):
                     try:
-                        page = await context.new_page()
+                        page = await asyncio.wait_for(
+                            context.new_page(),
+                            timeout=15
+                        )
                         break
-                    except Exception as e:
-                        logger.warning(f"Failed to create page for {crawler_id} (attempt {attempt + 1}/3): {e}")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Page creation timeout for worker {self._worker_id} (attempt {attempt + 1}/3)")
                         if attempt < 2:
-                            # Try to recreate context if page creation fails
-                            try:
-                                await context.close()
-                            except:
-                                pass
-                            
-                            # Recreate context
+                            await asyncio.sleep(2)
+                        else:
+                            # If page creation fails, recreate context
+                            await context.close()
                             context = await browser.new_context(
                                 user_agent=user_agent,
                                 viewport=viewport,
@@ -112,16 +310,26 @@ class AsyncBrowserContextManager:
                                     'Upgrade-Insecure-Requests': '1',
                                 }
                             )
-                            await asyncio.sleep(1)
+                            page = await context.new_page()
+                            break
+                    except Exception as e:
+                        logger.warning(f"Failed to create page for worker {self._worker_id} (attempt {attempt + 1}/3): {e}")
+                        if attempt < 2:
+                            await asyncio.sleep(2)
                         else:
                             raise
                 
-                logger.debug(f"Created context for {crawler_id}, active contexts: {self._active_contexts[crawler_id]}")
+                # Track active contexts
+                if worker_key not in self._active_contexts:
+                    self._active_contexts[worker_key] = 0
+                self._active_contexts[worker_key] += 1
+                
+                logger.debug(f"Created context for worker {self._worker_id}, active contexts: {self._active_contexts[worker_key]}")
                 
                 yield context, page
                 
         except Exception as e:
-            logger.error(f"Error in playwright context for {crawler_id}: {e}")
+            logger.error(f"Error in playwright context for worker {self._worker_id}: {e}")
             raise
         finally:
             # Cleanup context
@@ -129,328 +337,131 @@ class AsyncBrowserContextManager:
                 try:
                     await context.close()
                     async with self._lock:
-                        self._active_contexts[crawler_id] = max(0, self._active_contexts.get(crawler_id, 0) - 1)
-                    logger.debug(f"Closed context for {crawler_id}, active contexts: {self._active_contexts.get(crawler_id, 0)}")
+                        worker_key = f"{self._worker_id}_{crawler_id}"
+                        if worker_key in self._active_contexts:
+                            self._active_contexts[worker_key] = max(0, self._active_contexts[worker_key] - 1)
+                    logger.debug(f"Closed context for worker {self._worker_id}, active contexts: {self._active_contexts.get(worker_key, 0)}")
                 except Exception as e:
-                    logger.warning(f"Error closing context for {crawler_id}: {e}")
+                    logger.warning(f"Error closing context for worker {self._worker_id}: {e}")
     
     @asynccontextmanager
     async def get_crawl4ai_crawler(self, crawler_id: str, user_agent: str, viewport: dict = None):
-        """Async context manager for Crawl4AI crawler with automatic cleanup"""
+        """Enhanced Crawl4AI crawler with process isolation and memory monitoring"""
         crawler = None
         
         try:
             async with self._lock:
-                # Get or create crawler
+                # Check worker memory pressure
+                if await self._check_memory_pressure():
+                    logger.warning(f"Memory pressure detected, forcing browser restart for worker {self._worker_id}")
+                    await self._restart_all_worker_browsers()
+                
+                # Get or create crawler with process isolation
                 crawler = await self._get_or_create_crawl4ai_crawler(crawler_id, user_agent, viewport)
                 
-                logger.debug(f"Using Crawl4AI crawler for {crawler_id}")
+                logger.debug(f"Created Crawl4AI crawler for worker {self._worker_id}")
                 
                 yield crawler
                 
         except Exception as e:
-            logger.error(f"Error in Crawl4AI crawler for {crawler_id}: {e}")
+            logger.error(f"Error in Crawl4AI crawler for worker {self._worker_id}: {e}")
             raise
         finally:
-            # Note: Crawl4AI crawler is reused, not closed here
-            pass
+            # Cleanup crawler
+            if crawler:
+                try:
+                    await crawler.close()
+                    logger.debug(f"Closed Crawl4AI crawler for worker {self._worker_id}")
+                except Exception as e:
+                    logger.warning(f"Error closing Crawl4AI crawler for worker {self._worker_id}: {e}")
     
-    async def _get_or_create_browser(self, crawler_id: str) -> Browser:
-        """Get or create browser with proper resource management"""
-        if crawler_id not in self._browsers:
-            # Check if we need to close an old browser
-            if len(self._browsers) >= self._max_browsers:
-                await self._close_oldest_browser()
-            
-            # Create new browser with minimal, stable arguments
-            playwright = await async_playwright().start()
-            browser = await playwright.chromium.launch(
-                headless=True,
-                args=[
-                    # Essential for Docker/headless
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    
-                    # Memory and performance
-                    "--memory-pressure-off",
-                    "--max_old_space_size=2048",
-                    "--disable-gpu",
-                    
-                    # Background processes
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    "--disable-background-networking",
-                    "--disable-background-mode",
-                    
-                    # Features to disable
-                    "--disable-extensions",
-                    "--disable-default-apps",
-                    "--disable-sync",
-                    "--disable-translate",
-                    "--disable-features=TranslateUI,BlinkGenPropertyTrees",
-                    "--disable-component-extensions-with-background-pages",
-                    "--disable-plugins-discovery",
-                    "--disable-permissions-api",
-                    "--disable-presentation-api",
-                    "--disable-shared-workers",
-                    "--disable-webgl",
-                    "--disable-webgl2",
-                    
-                    # Security and detection
-                    "--disable-web-security",
-                    "--disable-client-side-phishing-detection",
-                    "--disable-blink-features=AutomationControlled",
-                    
-                    # UI and audio
-                    "--hide-scrollbars",
-                    "--mute-audio",
-                    "--no-first-run",
-                    
-                    # Logging and debugging
-                    "--disable-logging",
-                    "--disable-gpu-logging",
-                    "--silent",
-                    "--log-level=3",
-                    "--disable-crash-reporter",
-                    "--disable-in-process-stack-traces",
-                    "--disable-dev-tools",
-                    
-                    # Network and connectivity
-                    "--disable-preconnect",
-                    "--disable-remote-fonts",
-                    "--disable-domain-reliability",
-                    "--disable-component-update",
-                    "--no-report-upload",
-                    
-                    # System integration
-                    "--use-mock-keychain",
-                    "--force-color-profile=srgb",
-                    "--metrics-recording-only",
-                    
-                    # Process management
-                    "--no-zygote",
-                    "--disable-hang-monitor",
-                    "--disable-prompt-on-repost",
-                    "--disable-xss-auditor",
-                    "--disable-breakpad"
-                ]
-            )
-            self._browsers[crawler_id] = browser
-            self._active_contexts[crawler_id] = 0
-            logger.info(f"Created new browser for {crawler_id}")
+    async def _get_or_create_crawl4ai_crawler(self, crawler_id: str, user_agent: str, viewport: dict = None):
+        """Get or create Crawl4AI crawler with process isolation"""
+        worker_key = f"{self._worker_id}_{crawler_id}"
         
-        return self._browsers[crawler_id]
-    
-    async def _get_or_create_crawl4ai_crawler(self, crawler_id: str, user_agent: str, viewport: dict = None) -> AsyncWebCrawler:
-        """Get or create Crawl4AI crawler with proper resource management"""
-        if crawler_id not in self._crawl4ai_crawlers:
-            # Check if we need to close an old crawler
-            if len(self._crawl4ai_crawlers) >= self._max_browsers:
-                await self._close_oldest_crawl4ai_crawler()
-            
-            # Create new Crawl4AI crawler
-            crawler = AsyncWebCrawler(
-                user_agent=user_agent,
-                browser_type="chromium",
-                headless=True,
-                browser_args=[
-                    # Essential for Docker/headless
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    
-                    # Memory and performance
-                    "--memory-pressure-off",
-                    "--disable-gpu",
-                    "--disable-software-rasterizer",
-                    
-                    # Background processes
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    "--disable-background-networking",
-                    "--disable-background-mode",
-                    
-                    # Features to disable
-                    "--disable-extensions",
-                    "--disable-default-apps",
-                    "--disable-sync",
-                    "--disable-translate",
-                    "--disable-features=TranslateUI,VizDisplayCompositor",
-                    "--disable-component-extensions-with-background-pages",
-                    "--disable-plugins-discovery",
-                    "--disable-permissions-api",
-                    "--disable-presentation-api",
-                    "--disable-shared-workers",
-                    "--disable-webgl",
-                    "--disable-webgl2",
-                    
-                    # Security and detection
-                    "--disable-web-security",
-                    "--disable-client-side-phishing-detection",
-                    "--disable-blink-features=AutomationControlled",
-                    
-                    # UI and audio
-                    "--hide-scrollbars",
-                    "--mute-audio",
-                    "--no-first-run",
-                    
-                    # Logging and debugging
-                    "--disable-logging",
-                    "--disable-gpu-logging",
-                    "--silent",
-                    "--log-level=3",
-                    "--disable-crash-reporter",
-                    "--disable-in-process-stack-traces",
-                    "--disable-dev-tools",
-                    
-                    # Network and connectivity
-                    "--disable-preconnect",
-                    "--disable-remote-fonts",
-                    "--disable-domain-reliability",
-                    "--disable-component-update",
-                    "--no-report-upload",
-                    
-                    # System integration
-                    "--use-mock-keychain",
-                    "--force-color-profile=srgb",
-                    "--metrics-recording-only",
-                    
-                    # Process management
-                    "--no-zygote",
-                    "--disable-hang-monitor",
-                    "--disable-prompt-on-repost",
-                    "--disable-xss-auditor",
-                    "--disable-breakpad"
-                ]
-            )
-            self._crawl4ai_crawlers[crawler_id] = crawler
-            logger.info(f"Created new Crawl4AI crawler for {crawler_id}")
-        
-        return self._crawl4ai_crawlers[crawler_id]
-    
-    async def _close_oldest_browser(self):
-        """Close the oldest browser to make room for new one"""
-        if not self._browsers:
-            return
-        
-        # Find browser with least active contexts
-        oldest_id = min(self._browsers.keys(), key=lambda k: self._active_contexts.get(k, 0))
-        
-        try:
-            await self._browsers[oldest_id].close()
-            del self._browsers[oldest_id]
-            del self._active_contexts[oldest_id]
-            logger.info(f"Closed oldest browser: {oldest_id}")
-        except Exception as e:
-            logger.warning(f"Error closing browser {oldest_id}: {e}")
-    
-    async def _close_oldest_crawl4ai_crawler(self):
-        """Close the oldest Crawl4AI crawler to make room for new one"""
-        if not self._crawl4ai_crawlers:
-            return
-        
-        # Find oldest crawler
-        oldest_id = min(self._crawl4ai_crawlers.keys(), key=lambda k: time.time())
-        
-        try:
-            await self._crawl4ai_crawlers[oldest_id].close()
-            del self._crawl4ai_crawlers[oldest_id]
-            logger.info(f"Closed oldest Crawl4AI crawler: {oldest_id}")
-        except Exception as e:
-            logger.warning(f"Error closing Crawl4AI crawler {oldest_id}: {e}")
-    
-    async def _restart_browser(self, crawler_id: str):
-        """Restart browser for specific crawler with proper cleanup"""
-        if crawler_id in self._browsers:
+        # Check if crawler exists and is healthy
+        if worker_key in self._worker_browser_pool:
+            crawler = self._worker_browser_pool[worker_key]
             try:
-                # Close browser and wait a bit to ensure cleanup
-                await self._browsers[crawler_id].close()
-                await asyncio.sleep(1)  # Wait for cleanup
-                
-                # Clean up all references
-                del self._browsers[crawler_id]
-                if crawler_id in self._active_contexts:
-                    del self._active_contexts[crawler_id]
-                if crawler_id in self._request_counts:
-                    del self._request_counts[crawler_id]
-                    
-                logger.info(f"Restarted browser for {crawler_id}")
+                # Simple health check
+                if hasattr(crawler, 'browser') and crawler.browser:
+                    await crawler.browser.version()
+                return crawler
             except Exception as e:
-                logger.warning(f"Error restarting browser for {crawler_id}: {e}")
-                # Force cleanup even if close failed
-                if crawler_id in self._browsers:
-                    del self._browsers[crawler_id]
-                if crawler_id in self._active_contexts:
-                    del self._active_contexts[crawler_id]
-                if crawler_id in self._request_counts:
-                    del self._request_counts[crawler_id]
-
-    async def cleanup_crawler(self, crawler_id: str):
-        """Cleanup all resources for specific crawler"""
-        async with self._lock:
-            # Close browser
-            if crawler_id in self._browsers:
-                try:
-                    await self._browsers[crawler_id].close()
-                    del self._browsers[crawler_id]
-                    del self._active_contexts[crawler_id]
-                    if crawler_id in self._request_counts:
-                        del self._request_counts[crawler_id]
-                    logger.info(f"Closed browser for {crawler_id}")
-                except Exception as e:
-                    logger.warning(f"Error closing browser for {crawler_id}: {e}")
-            
-            # Close Crawl4AI crawler
-            if crawler_id in self._crawl4ai_crawlers:
-                try:
-                    await self._crawl4ai_crawlers[crawler_id].close()
-                    del self._crawl4ai_crawlers[crawler_id]
-                    logger.info(f"Closed Crawl4AI crawler for {crawler_id}")
-                except Exception as e:
-                    logger.warning(f"Error closing Crawl4AI crawler for {crawler_id}: {e}")
+                logger.warning(f"Crawl4AI crawler {worker_key} health check failed: {e}")
+                await self._restart_browser(worker_key)
+        
+        # Create new crawler
+        crawler = await self._create_new_crawl4ai_crawler(worker_key, user_agent, viewport)
+        self._worker_browser_pool[worker_key] = crawler
+        return crawler
     
-    async def cleanup_all(self):
-        """Cleanup all browser resources"""
-        async with self._lock:
-            # Close all browsers
-            for crawler_id in list(self._browsers.keys()):
-                try:
-                    await self._browsers[crawler_id].close()
-                except:
-                    pass
+    async def _create_new_crawl4ai_crawler(self, worker_key: str, user_agent: str, viewport: dict = None):
+        """Create new Crawl4AI crawler with optimized settings"""
+        try:
+            # Default viewport if not provided
+            if viewport is None:
+                viewport = {"width": 1920, "height": 1080}
             
-            # Close all Crawl4AI crawlers
-            for crawler_id in list(self._crawl4ai_crawlers.keys()):
-                try:
-                    await self._crawl4ai_crawlers[crawler_id].close()
-                except:
-                    pass
+            # Create crawler with process isolation
+            crawler = AsyncWebCrawler(
+                headless=True,
+                user_agent=user_agent,
+                viewport=viewport,
+                browser_type="chromium",
+                # Enhanced browser arguments for stability
+                browser_args=[
+                    "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+                    "--memory-pressure-off", "--max_old_space_size=1024", "--disable-gpu",
+                    "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding", "--disable-background-networking",
+                    "--disable-extensions", "--disable-default-apps", "--disable-sync",
+                    "--disable-translate", "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+                    "--disable-component-extensions-with-background-pages", "--disable-plugins-discovery",
+                    "--disable-permissions-api", "--disable-presentation-api", "--disable-shared-workers",
+                    "--disable-webgl", "--disable-webgl2", "--disable-web-security",
+                    "--disable-client-side-phishing-detection", "--disable-blink-features=AutomationControlled",
+                    "--hide-scrollbars", "--mute-audio", "--no-first-run", "--disable-logging",
+                    "--disable-gpu-logging", "--silent", "--log-level=3", "--disable-crash-reporter",
+                    "--disable-in-process-stack-traces", "--disable-dev-tools", "--disable-preconnect",
+                    "--disable-remote-fonts", "--disable-domain-reliability", "--disable-component-update",
+                    "--no-report-upload", "--use-mock-keychain", "--force-color-profile=srgb",
+                    "--metrics-recording-only", "--no-zygote", "--disable-hang-monitor",
+                    "--disable-prompt-on-repost", "--disable-xss-auditor", "--disable-breakpad",
+                    f"--user-data-dir=/tmp/crawl4ai_{self._worker_id}_{worker_key}",
+                    f"--remote-debugging-port={8000 + hash(worker_key) % 1000}"
+                ]
+            )
             
-            self._browsers.clear()
-            self._crawl4ai_crawlers.clear()
-            self._active_contexts.clear()
+            logger.info(f"Created new Crawl4AI crawler for worker {self._worker_id} with key {worker_key}")
+            return crawler
             
-            logger.info("All browser resources cleaned up")
+        except Exception as e:
+            logger.error(f"Failed to create Crawl4AI crawler for worker {self._worker_id}: {e}")
+            raise
     
-    def get_stats(self) -> dict:
-        """Get resource usage statistics"""
-        return {
-            "browsers": len(self._browsers),
-            "crawl4ai_crawlers": len(self._crawl4ai_crawlers),
-            "active_contexts": sum(self._active_contexts.values()),
-            "max_browsers": self._max_browsers,
-            "max_contexts_per_browser": self._max_contexts_per_browser
-        }
+    async def cleanup(self):
+        """Cleanup all resources for current worker"""
+        try:
+            # Close all browsers for this worker
+            await self._restart_all_worker_browsers()
+            
+            # Clear tracking data
+            worker_keys = [key for key in self._request_counts.keys() if key.startswith(self._worker_id)]
+            for key in worker_keys:
+                del self._request_counts[key]
+            
+            worker_keys = [key for key in self._active_contexts.keys() if key.startswith(self._worker_id)]
+            for key in worker_keys:
+                del self._active_contexts[key]
+            
+            # Force garbage collection
+            await self._force_garbage_collection()
+            
+            logger.info(f"Cleanup completed for worker {self._worker_id}")
+            
+        except Exception as e:
+            logger.warning(f"Error during cleanup for worker {self._worker_id}: {e}")
 
 # Global instance
-_global_context_manager = None
-
-def get_global_context_manager() -> AsyncBrowserContextManager:
-    """Get global async context manager instance"""
-    global _global_context_manager
-    if _global_context_manager is None:
-        _global_context_manager = AsyncBrowserContextManager()
-    return _global_context_manager
+context_manager = AsyncBrowserContextManager()

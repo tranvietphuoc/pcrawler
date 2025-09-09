@@ -15,6 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && python -m playwright install chromium && python -m playwright install-deps chromium
 COPY . .
 ENV PYTHONUNBUFFERED=1 TZ=Asia/Ho_Chi_Minh \
+    PYTHONPATH=/app \
     CELERY_BROKER_URL=redis://redis:6379/0 \
     CELERY_RESULT_BACKEND=redis://redis:6379/0
 CMD ["bash"]

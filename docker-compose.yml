@@ -1,69 +1,159 @@
+version: "3.8"
+
 services:
   redis:
     image: redis:7-alpine
     container_name: crawler_redis
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
     volumes:
-      - redis-data:/data
-    # Tối ưu Redis cho 50% tài nguyên (10 cores + 16GB RAM)
-    command: redis-server --maxmemory 4gb --maxmemory-policy allkeys-lru --tcp-keepalive 60 --timeout 300
-
-  worker:
-    build: .
-    depends_on: [redis]
-    # shm_size: "1g" # optimized for 4-core CPU (cũ)
-    shm_size: "2g" # Sử dụng 50% tài nguyên (2g cho 20 cores)
-    # mem_limit: "3g" # giới hạn RAM cứng cho worker (cũ)
-    mem_limit: "16g" # Sử dụng 50% RAM (16/32GB)
-    # mem_reservation: "2g" # gợi ý mức RAM tối thiểu (cũ)
-    mem_reservation: "8g" # Đảm bảo ít nhất 8GB (25% RAM)
-    # Tối ưu cho CPU 20 cores - sử dụng 50% (10/20 cores)
+      - redis_data:/data
+    networks:
+      - crawler_network
     deploy:
       resources:
         limits:
-          # cpus: '16.0' # Sử dụng 16/20 cores cho worker (quá cao)
-          cpus: "10.0" # Sử dụng 10/20 cores cho worker (50% CPU)
-          memory: 16G
+          cpus: "1.0"
+          memory: 2G
         reservations:
-          # cpus: '12.0' # Đảm bảo ít nhất 12 cores (cũ)
-          cpus: "6.0" # Đảm bảo ít nhất 6 cores (30% CPU)
-          memory: 8G
-    environment:
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-      - CELERY_WORKER_HEARTBEAT=30
-      # - CELERY_WORKER_MAX_TASKS_PER_CHILD=20 # 2GB mỗi child (cũ)
-      - CELERY_WORKER_MAX_TASKS_PER_CHILD=30 # Cân bằng cho 50% tài nguyên
-      # - CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000 # 2GB mỗi child (cũ)
-      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=2000000 # 2GB mỗi child cho 50% RAM
-      # - CELERY_WORKER_CONCURRENCY=4 # Sử dụng 4 cores (cũ)
-      - CELERY_WORKER_CONCURRENCY=5 # Sử dụng 5 cores cho 50% CPU (10/20 cores)
-      # - CELERY_WORKER_PREFETCH_MULTIPLIER=1 # Tăng từ 1 lên 2 (cũ)
-      - CELERY_WORKER_PREFETCH_MULTIPLIER=2 # Cân bằng cho 50% tài nguyên
-    volumes: ["./data:/app/data"]
-    command: >
-      celery -A app.tasks.celery_app worker
-      --loglevel=INFO
-      -Q crawl
-      -c 5
-      --prefetch-multiplier=2
-      --without-heartbeat
-      --max-memory-per-child=2000000
+          cpus: "0.5"
+          memory: 1G
 
-  app:
+  worker-1:
+    build: .
+    container_name: crawler_worker_1
+    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker-1@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
+    environment:
+      - CELERY_WORKER_ID=worker-1
+      - CELERY_WORKER_CONCURRENCY=3
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=1
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=20
+      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=1500000
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - ./app:/app/app
+      - ./config:/app/config
+      - ./data:/app/data
+      - /tmp/playwright_worker-1:/tmp/playwright_worker-1
+      - /tmp/crawl4ai_worker-1:/tmp/crawl4ai_worker-1
+    depends_on:
+      - redis
+    networks:
+      - crawler_network
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 4G
+        reservations:
+          cpus: "2.0"
+          memory: 3G
+    restart: unless-stopped
+
+  worker-2:
+    build: .
+    container_name: crawler_worker_2
+    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker-2@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
+    environment:
+      - CELERY_WORKER_ID=worker-2
+      - CELERY_WORKER_CONCURRENCY=3
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=1
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=20
+      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=1500000
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - ./app:/app/app
+      - ./config:/app/config
+      - ./data:/app/data
+      - /tmp/playwright_worker-2:/tmp/playwright_worker-2
+      - /tmp/crawl4ai_worker-2:/tmp/crawl4ai_worker-2
+    depends_on:
+      - redis
+    networks:
+      - crawler_network
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 4G
+        reservations:
+          cpus: "2.0"
+          memory: 3G
+    restart: unless-stopped
+
+  worker-3:
+    build: .
+    container_name: crawler_worker_3
+    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker-3@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
+    environment:
+      - CELERY_WORKER_ID=worker-3
+      - CELERY_WORKER_CONCURRENCY=3
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=1
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=20
+      - CELERY_WORKER_MAX_MEMORY_PER_CHILD=1500000
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - ./app:/app/app
+      - ./config:/app/config
+      - ./data:/app/data
+      - /tmp/playwright_worker-3:/tmp/playwright_worker-3
+      - /tmp/crawl4ai_worker-3:/tmp/crawl4ai_worker-3
+    depends_on:
+      - redis
+    networks:
+      - crawler_network
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 4G
+        reservations:
+          cpus: "2.0"
+          memory: 3G
+    restart: unless-stopped
+
+  crawler_app:
     build: .
     container_name: crawler_app
-    depends_on: [redis, worker]
-    # shm_size: "1g" (cũ)
-    shm_size: "2g" # Tăng từ 1g lên 2g
-    # mem_limit: default (cũ)
-    mem_limit: "4g" # Tăng từ default lên 4g
+    command: python -m app.main
     environment:
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-    volumes: ["./data:/app/data"]
-    command: >
-      python -m app.main crawl --config 1900comvn
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./app:/app
+      - ./config:/app/config
+      - ./data:/app/data
+    depends_on:
+      - redis
+      - worker-1
+      - worker-2
+      - worker-3
+    networks:
+      - crawler_network
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+    restart: unless-stopped
 
-volumes: { redis-data: {} }
+volumes:
+  redis_data:
+
+networks:
+  crawler_network:
+    driver: bridge
