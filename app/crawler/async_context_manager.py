@@ -498,5 +498,9 @@ class AsyncBrowserContextManager:
         except Exception as e:
             logger.warning(f"Error during cleanup for worker {self._worker_id}: {e}")
 
-# Global instance
-context_manager = AsyncBrowserContextManager()
+# Create new instance for each worker (no singleton)
+def get_context_manager():
+    return AsyncBrowserContextManager()
+
+# For backward compatibility, create instance
+context_manager = get_context_manager()

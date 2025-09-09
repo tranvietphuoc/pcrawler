@@ -3,6 +3,7 @@ from typing import List, Tuple
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
 from .base_crawler import BaseCrawler
+from .async_context_manager import get_context_manager
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -16,6 +17,8 @@ class ListCrawler(BaseCrawler):
         self.max_retries = max_retries or self.config.processing_config["max_retries"]
         self.delay_range = delay_range or self.config.processing_config["delay_range"]
         self.max_requests_per_browser = 50  # Override for ListCrawler - restart more frequently
+        # Create new context manager instance for this crawler
+        self.context_manager = get_context_manager()
 
     # Removed _open_context() - now using Async Context Manager directly
 
