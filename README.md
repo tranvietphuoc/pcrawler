@@ -45,55 +45,56 @@ make docker-merge    # Merge CSV files
 ### Complete Crawling Process
 
 ```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#ff0000', 'primaryTextColor': '#000000', 'primaryBorderColor': '#000000', 'lineColor': '#000000', 'secondaryColor': '#ffffff', 'tertiaryColor': '#ffffff', 'background': '#ffffff', 'mainBkg': '#ffffff', 'secondBkg': '#ffffff', 'tertiaryBkg': '#ffffff'}}}%%
 graph LR
-    subgraph "Phase 0: Link Fetching"
-        A[Start] --> B[Get Industries]
-        B --> C[Submit Link Tasks]
-        C --> D[Parallel Link Fetching]
-        D --> E[Collect Links]
+    subgraph "🔗 Phase 0: Link Fetching"
+        A["🚀 Start<br/>Crawling Process"] --> B["📋 Get Industries<br/>List from Website"]
+        B --> C["📤 Submit Link Tasks<br/>to Celery Workers"]
+        C --> D["⚡ Parallel Link Fetching<br/>Multiple Workers"]
+        D --> E["📊 Collect Links<br/>All Company URLs"]
     end
 
-    subgraph "Phase 1: Detail Crawling"
-        E --> F[Submit Detail Tasks]
-        F --> G[Parallel Detail Crawling]
-        G --> H[Store HTML in DB]
+    subgraph "📄 Phase 1: Detail Crawling"
+        E --> F["📤 Submit Detail Tasks<br/>to Celery Workers"]
+        F --> G["⚡ Parallel Detail Crawling<br/>Multiple Workers"]
+        G --> H["💾 Store HTML in DB<br/>detail_html_storage"]
     end
 
-    subgraph "Phase 2: Extract Details"
-        H --> I[Submit Extract Tasks]
-        I --> J[Load HTML from DB]
-        J --> K[Extract Company Info]
-        K --> L[Store in company_details]
+    subgraph "🔍 Phase 2: Extract Details"
+        H --> I["📤 Submit Extract Tasks<br/>to Celery Workers"]
+        I --> J["📥 Load HTML from DB<br/>detail_html_storage"]
+        J --> K["🔍 Extract Company Info<br/>Name, Address, Phone, etc."]
+        K --> L["💾 Store in company_details<br/>Structured Data"]
     end
 
-    subgraph "Phase 3: Contact Crawling"
-        L --> M[Submit Contact Tasks]
-        M --> N[Load Website/Facebook URLs]
-        N --> O[Parallel Contact Crawling]
-        O --> P[Store Contact HTML]
+    subgraph "🌐 Phase 3: Contact Crawling"
+        L --> M["📤 Submit Contact Tasks<br/>to Celery Workers"]
+        M --> N["📥 Load Website/Facebook URLs<br/>from company_details"]
+        N --> O["⚡ Parallel Contact Crawling<br/>Multiple Workers"]
+        O --> P["💾 Store Contact HTML<br/>contact_html_storage"]
     end
 
-    subgraph "Phase 4: Email Extraction"
-        P --> Q[Submit Email Tasks]
-        Q --> R[Load Contact HTML]
-        R --> S[Extract Emails]
-        S --> T[Store Emails]
+    subgraph "📧 Phase 4: Email Extraction"
+        P --> Q["📤 Submit Email Tasks<br/>to Celery Workers"]
+        Q --> R["📥 Load Contact HTML<br/>contact_html_storage"]
+        R --> S["📧 Extract Emails<br/>using Crawl4AI"]
+        S --> T["💾 Store Emails<br/>email_extraction"]
     end
 
-    subgraph "Phase 5: Final Export"
-        T --> U[Submit Export Task]
-        U --> V[Join All Tables]
-        V --> W[Export CSV]
-        W --> X[End]
+    subgraph "📊 Phase 5: Final Export"
+        T --> U["📤 Submit Export Task<br/>to Celery Worker"]
+        U --> V["🔗 Join All Tables<br/>Combine Data"]
+        V --> W["📄 Export CSV<br/>Final Result"]
+        W --> X["✅ End<br/>Process Complete"]
     end
 
-    %% Styling
-    classDef phase0 fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef phase1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef phase2 fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
-    classDef phase3 fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef phase4 fill:#fce4ec,stroke:#880e4f,stroke-width:2px
-    classDef phase5 fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    %% Styling with larger fonts and boxes
+    classDef phase0 fill:#e1f5fe,stroke:#01579b,stroke-width:4px,font-size:14px,font-weight:bold
+    classDef phase1 fill:#f3e5f5,stroke:#4a148c,stroke-width:4px,font-size:14px,font-weight:bold
+    classDef phase2 fill:#e8f5e8,stroke:#1b5e20,stroke-width:4px,font-size:14px,font-weight:bold
+    classDef phase3 fill:#fff3e0,stroke:#e65100,stroke-width:4px,font-size:14px,font-weight:bold
+    classDef phase4 fill:#fce4ec,stroke:#880e4f,stroke-width:4px,font-size:14px,font-weight:bold
+    classDef phase5 fill:#f1f8e9,stroke:#33691e,stroke-width:4px,font-size:14px,font-weight:bold
 
     class A,B,C,D,E phase0
     class F,G,H phase1
