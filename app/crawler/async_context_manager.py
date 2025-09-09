@@ -175,7 +175,6 @@ class AsyncBrowserContextManager:
                     "--disable-xss-auditor", "--disable-breakpad",
                     
                     # Process isolation
-                    f"--user-data-dir=/tmp/playwright_{self._worker_id}_{worker_key}",
                     f"--remote-debugging-port={9000 + hash(worker_key) % 1000}"
                 ]
             )
@@ -430,7 +429,6 @@ class AsyncBrowserContextManager:
                     "--no-report-upload", "--use-mock-keychain", "--force-color-profile=srgb",
                     "--metrics-recording-only", "--no-zygote", "--disable-hang-monitor",
                     "--disable-prompt-on-repost", "--disable-xss-auditor", "--disable-breakpad",
-                    f"--user-data-dir=/tmp/crawl4ai_{self._worker_id}_{worker_key}",
                     f"--remote-debugging-port={8000 + hash(worker_key) % 1000}"
                 ]
             )

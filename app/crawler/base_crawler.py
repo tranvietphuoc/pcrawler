@@ -54,8 +54,8 @@ class BaseCrawler:
 
     async def cleanup(self):
         """Cleanup all browser resources using Async Context Manager"""
-        # Use Async Context Manager to cleanup crawler-specific resources
-        await self.context_manager.cleanup_crawler(self.crawler_id)
+        # Use Async Context Manager to cleanup all resources
+        await self.context_manager.cleanup()
         
         # Reset state
         self.request_count = 0
