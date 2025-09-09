@@ -42,66 +42,37 @@ make docker-merge    # Merge CSV files
 
 ## Architecture Flow
 
-### Complete Crawling Process
+### Crawling Process Flow
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#ff0000', 'primaryTextColor': '#000000', 'primaryBorderColor': '#000000', 'lineColor': '#000000', 'secondaryColor': '#ffffff', 'tertiaryColor': '#ffffff', 'background': '#ffffff', 'mainBkg': '#ffffff', 'secondBkg': '#ffffff', 'tertiaryBkg': '#ffffff'}}}%%
-graph LR
-    subgraph "🔗 Phase 0: Link Fetching"
-        A["🚀 Start<br/>Crawling Process"] --> B["📋 Get Industries<br/>List from Website"]
-        B --> C["📤 Submit Link Tasks<br/>to Celery Workers"]
-        C --> D["⚡ Parallel Link Fetching<br/>Multiple Workers"]
-        D --> E["📊 Collect Links<br/>All Company URLs"]
+graph TB
+    subgraph "Row 1: Data Collection"
+        A["🔗 Phase 0<br/>Link Fetching"] --> B["📄 Phase 1<br/>Detail Crawling"]
+        B --> C["🔍 Phase 2<br/>Extract Details"]
     end
 
-    subgraph "📄 Phase 1: Detail Crawling"
-        E --> F["📤 Submit Detail Tasks<br/>to Celery Workers"]
-        F --> G["⚡ Parallel Detail Crawling<br/>Multiple Workers"]
-        G --> H["💾 Store HTML in DB<br/>detail_html_storage"]
+    subgraph "Row 2: Contact & Email"
+        D["🌐 Phase 3<br/>Contact Crawling"] --> E["📧 Phase 4<br/>Email Extraction"]
+        E --> F["📊 Phase 5<br/>Final Export"]
     end
 
-    subgraph "🔍 Phase 2: Extract Details"
-        H --> I["📤 Submit Extract Tasks<br/>to Celery Workers"]
-        I --> J["📥 Load HTML from DB<br/>detail_html_storage"]
-        J --> K["🔍 Extract Company Info<br/>Name, Address, Phone, etc."]
-        K --> L["💾 Store in company_details<br/>Structured Data"]
-    end
+    C --> D
 
-    subgraph "🌐 Phase 3: Contact Crawling"
-        L --> M["📤 Submit Contact Tasks<br/>to Celery Workers"]
-        M --> N["📥 Load Website/Facebook URLs<br/>from company_details"]
-        N --> O["⚡ Parallel Contact Crawling<br/>Multiple Workers"]
-        O --> P["💾 Store Contact HTML<br/>contact_html_storage"]
-    end
+    %% Styling
+    classDef phase0 fill:#e1f5fe,stroke:#01579b,stroke-width:4px,font-size:18px,font-weight:bold
+    classDef phase1 fill:#f3e5f5,stroke:#4a148c,stroke-width:4px,font-size:18px,font-weight:bold
+    classDef phase2 fill:#e8f5e8,stroke:#1b5e20,stroke-width:4px,font-size:18px,font-weight:bold
+    classDef phase3 fill:#fff3e0,stroke:#e65100,stroke-width:4px,font-size:18px,font-weight:bold
+    classDef phase4 fill:#fce4ec,stroke:#880e4f,stroke-width:4px,font-size:18px,font-weight:bold
+    classDef phase5 fill:#f1f8e9,stroke:#33691e,stroke-width:4px,font-size:18px,font-weight:bold
 
-    subgraph "📧 Phase 4: Email Extraction"
-        P --> Q["📤 Submit Email Tasks<br/>to Celery Workers"]
-        Q --> R["📥 Load Contact HTML<br/>contact_html_storage"]
-        R --> S["📧 Extract Emails<br/>using Crawl4AI"]
-        S --> T["💾 Store Emails<br/>email_extraction"]
-    end
-
-    subgraph "📊 Phase 5: Final Export"
-        T --> U["📤 Submit Export Task<br/>to Celery Worker"]
-        U --> V["🔗 Join All Tables<br/>Combine Data"]
-        V --> W["📄 Export CSV<br/>Final Result"]
-        W --> X["✅ End<br/>Process Complete"]
-    end
-
-    %% Styling with larger fonts and boxes
-    classDef phase0 fill:#e1f5fe,stroke:#01579b,stroke-width:4px,font-size:14px,font-weight:bold
-    classDef phase1 fill:#f3e5f5,stroke:#4a148c,stroke-width:4px,font-size:14px,font-weight:bold
-    classDef phase2 fill:#e8f5e8,stroke:#1b5e20,stroke-width:4px,font-size:14px,font-weight:bold
-    classDef phase3 fill:#fff3e0,stroke:#e65100,stroke-width:4px,font-size:14px,font-weight:bold
-    classDef phase4 fill:#fce4ec,stroke:#880e4f,stroke-width:4px,font-size:14px,font-weight:bold
-    classDef phase5 fill:#f1f8e9,stroke:#33691e,stroke-width:4px,font-size:14px,font-weight:bold
-
-    class A,B,C,D,E phase0
-    class F,G,H phase1
-    class I,J,K,L phase2
-    class M,N,O,P phase3
-    class Q,R,S,T phase4
-    class U,V,W,X phase5
+    class A phase0
+    class B phase1
+    class C phase2
+    class D phase3
+    class E phase4
+    class F phase5
 ```
 
 ### Database Tables
