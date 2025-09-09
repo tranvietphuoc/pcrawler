@@ -244,7 +244,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
             # Cleanup
             loop.run_until_complete(detail_crawler.cleanup())
         
-        return {
+            return {
                 'status': 'completed',
                 'total_companies': total_companies,
                 'processed': processed,
@@ -509,7 +509,7 @@ def create_final_results():
             'message': f'Created final results with {count} companies (duplicated for multiple emails)',
             'count': count
         }
-            except Exception as e:
+    except Exception as e:
         logger.error(f"Failed to create final results: {e}")
         return {
             'status': 'failed',
@@ -528,8 +528,8 @@ def get_database_stats():
         
         email_extractor = EmailExtractor()
         summary = email_extractor.get_extraction_summary()
-    
-    return {
+        
+        return {
             'status': 'completed',
             'database_stats': stats,
             'extraction_summary': summary
@@ -617,4 +617,4 @@ def export_final_csv(self):
         return {
             'status': 'failed',
             'message': str(e)
-    }
+        }

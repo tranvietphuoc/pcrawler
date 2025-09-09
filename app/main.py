@@ -63,7 +63,6 @@ async def run(
     
     # Load existing checkpoints
     import json
-    import os
     checkpoint_dir = "/tmp"
     if os.path.exists(checkpoint_dir):
         for filename in os.listdir(checkpoint_dir):

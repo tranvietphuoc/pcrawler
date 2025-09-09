@@ -78,17 +78,17 @@ class ListCrawler(BaseCrawler):
         while (asyncio.get_event_loop().time() - start_time) < max_wait:
             try:
                 # Kiểm tra xem select2 có visible không
-            select2_selection = page.locator(self.config.get_xpath("industry_select"))
-            if await select2_selection.count() == 0:
-                select2_selection = page.locator(self.config.get_xpath("industry_select_fallback"))
+                select2_selection = page.locator(self.config.get_xpath("industry_select"))
+                if await select2_selection.count() == 0:
+                    select2_selection = page.locator(self.config.get_xpath("industry_select_fallback"))
 
                 if await select2_selection.count() > 0:
                     # Thử click để mở dropdown
-            await select2_selection.first.dispatch_event("mousedown")
+                    await select2_selection.first.dispatch_event("mousedown")
                     await asyncio.sleep(1)
 
                     # Kiểm tra xem dropdown có mở không
-            results_panel = page.locator(self.config.get_xpath("industry_results"))
+                    results_panel = page.locator(self.config.get_xpath("industry_results"))
                     if await results_panel.count() > 0:
                         return True
                 
@@ -193,26 +193,26 @@ class ListCrawler(BaseCrawler):
                         
                         # 4. Thu thập industries
                         logger.info("Extracting industry data...")
-            nodes = await page.locator(self.config.get_xpath("industry_options")).all()
+                        nodes = await page.locator(self.config.get_xpath("industry_options")).all()
                         logger.info(f"Processing {len(nodes)} industry nodes")
 
-            out: List[Tuple[str, str]] = []
+                        out: List[Tuple[str, str]] = []
                         skipped_count = 0
                         
                         for i, n in enumerate(nodes):
                             try:
-                text = (await n.text_content() or "").strip()
+                                text = (await n.text_content() or "").strip()
                                 if not text or text.lower() in ["no results found", "loading...", ""]:
                                     skipped_count += 1
-                    continue
+                                    continue
                                 
-                node_id = await n.get_attribute("id")
-                val = (
-                    node_id.split("-")[-1]
-                    if (node_id and "-" in node_id)
-                    else (await n.get_attribute("data-id")) or text
-                )
-                out.append((val, text))
+                                node_id = await n.get_attribute("id")
+                                val = (
+                                    node_id.split("-")[-1]
+                                    if (node_id and "-" in node_id)
+                                    else (await n.get_attribute("data-id")) or text
+                                )
+                                out.append((val, text))
 
                                 if (i + 1) % 10 == 0:  # Log progress mỗi 10 items
                                     logger.info(f"Processed {i + 1}/{len(nodes)} industries...")
@@ -227,7 +227,7 @@ class ListCrawler(BaseCrawler):
                         
                         logger.info(f"Industry extraction completed: {len(out)} valid, {skipped_count} skipped")
                         logger.info(f"Successfully found {len(out)} industries")
-            return out
+                        return out
 
                     except Exception as e:
                         logger.error(f"Error in get_industries: {e}")
@@ -318,21 +318,21 @@ class ListCrawler(BaseCrawler):
         # Sử dụng lại page đã có hoặc tạo mới nếu cần
         if page is None:
             # Fallback: tạo browser mới nếu không có page
-        for i in range(self.max_retries):
-            try:
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        args=[
-                            "--no-sandbox",
-                            "--disable-setuid-sandbox",
-                            "--disable-dev-shm-usage",
+            for i in range(self.max_retries):
+                try:
+                    async with async_playwright() as p:
+                        browser = await p.chromium.launch(
+                            headless=True,
+                            args=[
+                                "--no-sandbox",
+                                "--disable-setuid-sandbox",
+                                "--disable-dev-shm-usage",
                                 "--memory-pressure-off",  # Tắt memory pressure
                                 "--max_old_space_size=4096",  # Tăng heap size
-                        ],
-                    )
-                    context = await browser.new_context()
-                    page = await context.new_page()
+                            ],
+                        )
+                        context = await browser.new_context()
+                        page = await context.new_page()
                         # Tăng timeout cho từng trang để tránh bị stuck
                         page_timeout = min(self.config.processing_config["timeout"], 120000)  # Max 2 phút per page
                         await page.goto(
@@ -346,9 +346,9 @@ class ListCrawler(BaseCrawler):
                             if await a.get_attribute("href")
                         ]
                         # Note: page, context, browser are closed automatically by Async Context Manager
-            except Exception:
-                if i == self.max_retries - 1:
-                    return []
+                except Exception:
+                    if i == self.max_retries - 1:
+                        return []
                 await asyncio.sleep(random.uniform(1, 2))
         else:
             # Sử dụng page đã có
@@ -377,21 +377,21 @@ class ListCrawler(BaseCrawler):
         user_agent = await self._get_random_user_agent()
         viewport = await self._get_random_viewport()
         async with self.context_manager.get_playwright_context(self.crawler_id, user_agent, viewport) as (context, page):
-        try:
-            # Mở trang gốc
-            await page.goto(base_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")
+            try:
+                # Mở trang gốc
+                await page.goto(base_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")
                 
                 # Wait for network idle with safe fallback
                 await self._wait_for_network(page)
 
-            # Apply filter bằng UI
-            await self._apply_industry_filter(page, industry_name)
+                # Apply filter bằng UI
+                await self._apply_industry_filter(page, industry_name)
 
-            # URL sau filter (dùng làm base để thêm page=2,3,…)
-            filtered_url = page.url
+                # URL sau filter (dùng làm base để thêm page=2,3,…)
+                filtered_url = page.url
 
-            # Lấy tổng số trang ngay trên trang hiện tại
-            total = await self._get_total_pages_current(page)
+                # Lấy tổng số trang ngay trên trang hiện tại
+                total = await self._get_total_pages_current(page)
 
                 # Tạo danh sách URL các trang đã lọc (ước lượng ban đầu)
                 page_urls = [self._build_page_url(filtered_url, i) for i in range(1, max(total, 1) + 1)]
@@ -399,7 +399,7 @@ class ListCrawler(BaseCrawler):
             except Exception as e:
                 logger.error(f"Error in get_company_links_for_industry: {e}")
                 raise
-            # Context and page are automatically closed here
+                # Context and page are automatically closed here
 
         # Gom link song song: 1 browser/worker, tạo nhiều context/page song song qua context_manager
         seen, uniq = set(), []
