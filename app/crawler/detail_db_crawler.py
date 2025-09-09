@@ -15,9 +15,7 @@ class DetailDBCrawler(BaseCrawler):
         self.db_manager = DatabaseManager()
         self.max_requests_per_browser = 100  # Override for DetailDBCrawler - balance memory vs stability
         
-    async def _get_crawler(self):
-        """Get Crawl4AI crawler using base class method"""
-        return await self._get_crawl4ai_crawler()
+    # Removed _get_crawler() - now using context_manager.get_crawl4ai_crawler() directly
     
     async def crawl_detail_page(self, company_url: str, company_name: str, industry: str = None) -> bool:
         """Crawl detail page và lưu HTML vào database"""
@@ -27,25 +25,26 @@ class DetailDBCrawler(BaseCrawler):
         if not company_url.startswith(("http://", "https://")):
             company_url = "https://" + company_url
         
-        crawler = await self._get_crawler()
-        
-        try:
-            # Crawl detail page HTML content
-            result = await crawler.arun(url=company_url)
-            html_content = getattr(result, "html", None) or getattr(result, "content", None) or str(result)
-            
-            if html_content and len(html_content) > 100:  # Valid HTML content
-                # Store to database
-                record_id = self.db_manager.store_detail_html(company_name, company_url, html_content, industry)
-                logger.info(f"Stored detail HTML for {company_name}: {company_url} (ID: {record_id})")
-                return True
-            else:
-                logger.warning(f"Invalid HTML content for {company_name}: {company_url}")
-                return False
+        # Use Async Context Manager for Crawl4AI crawler
+        user_agent = await self._get_random_user_agent()
+        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent) as crawler:
+            try:
+                # Crawl detail page HTML content
+                result = await crawler.arun(url=company_url)
+                html_content = getattr(result, "html", None) or getattr(result, "content", None) or str(result)
                 
-        except Exception as e:
-            logger.error(f"Failed to crawl detail page for {company_name}: {company_url} - {e}")
-            return False
+                if html_content and len(html_content) > 100:  # Valid HTML content
+                    # Store to database
+                    record_id = self.db_manager.store_detail_html(company_name, company_url, html_content, industry)
+                    logger.info(f"Stored detail HTML for {company_name}: {company_url} (ID: {record_id})")
+                    return True
+                else:
+                    logger.warning(f"Invalid HTML content for {company_name}: {company_url}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Failed to crawl detail page for {company_name}: {company_url} - {e}")
+                return False
     
     async def crawl_batch(self, companies: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Crawl detail pages cho một batch companies"""

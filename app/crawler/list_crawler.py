@@ -138,7 +138,9 @@ class ListCrawler(BaseCrawler):
                 logger.info(f"Attempting to get industries (attempt {retry + 1}/{max_retries})")
                 
                 # Use Async Context Manager for automatic cleanup
-                async with self._open_playwright_context() as (context, page):
+                user_agent = await self._get_random_user_agent()
+                viewport = await self._get_random_viewport()
+                async with self.context_manager.get_playwright_context(self.crawler_id, user_agent, viewport) as (context, page):
                     try:
                         # 1. Load trang với timeout ổn định
                         timeout = self.config.processing_config.get("timeout", 60000)
@@ -349,7 +351,9 @@ class ListCrawler(BaseCrawler):
         rồi dùng URL sau filter để phân trang và gom link.
         """
         # Use Async Context Manager for automatic cleanup
-        async with self._open_playwright_context() as (context, page):
+        user_agent = await self._get_random_user_agent()
+        viewport = await self._get_random_viewport()
+        async with self.context_manager.get_playwright_context(self.crawler_id, user_agent, viewport) as (context, page):
             try:
                 # Mở trang gốc
                 await page.goto(base_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")

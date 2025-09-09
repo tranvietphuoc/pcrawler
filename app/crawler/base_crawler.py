@@ -48,36 +48,9 @@ class BaseCrawler:
         """Get random viewport"""
         return random.choice(self.viewports)
     
-    async def _open_playwright_context(self, force_new_browser: bool = False):
-        """Open Playwright context using Async Context Manager for conflict prevention"""
-        try:
-            # Get random user agent and viewport
-            user_agent = await self._get_random_user_agent()
-            viewport = await self._get_random_viewport()
-            
-            # Use Async Context Manager to get context
-            context_manager = self.context_manager.get_playwright_context(
-                self.crawler_id, user_agent, viewport
-            )
-            
-            # This will be used as async context manager
-            return context_manager
-            
-        except Exception as e:
-            logger.warning(f"{self.__class__.__name__} context creation failed: {e}")
-            raise
+    # Removed _open_playwright_context() - now using context_manager.get_playwright_context() directly
 
-    async def _get_crawl4ai_crawler(self):
-        """Get Crawl4AI crawler using Async Context Manager for conflict prevention"""
-        # Get random user agent
-        user_agent = await self._get_random_user_agent()
-        
-        # Use Async Context Manager to get crawler
-        context_manager = self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent)
-        
-        # Increment request count
-        self.request_count += 1
-        return context_manager
+    # Removed _get_crawl4ai_crawler() - now using context_manager.get_crawl4ai_crawler() directly
 
     async def cleanup(self):
         """Cleanup all browser resources using Async Context Manager"""
