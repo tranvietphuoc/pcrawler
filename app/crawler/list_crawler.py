@@ -377,7 +377,12 @@ class ListCrawler(BaseCrawler):
                 # Don't close browser here as it's managed by the class
                 await p.stop()
             except Exception as e:
-                print(f"[WARNING] Error closing browser: {e}")
+                logger.warning(f"Error closing browser: {e}")
+                # Force cleanup on error
+                try:
+                    await self.cleanup()
+                except:
+                    pass
 
         # Gom link "tổng quan" tuần tự theo từng trang - KHÔNG reuse page
         seen, uniq = set(), []

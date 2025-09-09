@@ -81,6 +81,16 @@ async def run(
                 logger.warning(f"[{ind_name}] Timeout on attempt {attempt+1}/{retries+1} (pass {pass_no})")
             except Exception as e:
                 logger.warning(f"[{ind_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {e}")
+                
+                # If browser context error, try to restart browser
+                if "Browser.new_context" in str(e) or "browser has been closed" in str(e):
+                    logger.warning(f"[{ind_name}] Browser context error detected, attempting browser restart...")
+                    try:
+                        await list_c.cleanup()
+                        await asyncio.sleep(3)  # Wait longer for cleanup
+                    except Exception as cleanup_error:
+                        logger.warning(f"[{ind_name}] Browser cleanup failed: {cleanup_error}")
+                
             await asyncio.sleep(delay_s)
         logger.error(f"[{ind_name}] Failed after {retries+1} attempts (pass {pass_no})")
         return links_local
