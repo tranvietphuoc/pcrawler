@@ -4,8 +4,8 @@ import gc
 import psutil
 import time
 from celery import Celery
-from app.crawler.html_crawler import HTMLCrawler
-from app.crawler.detail_db_crawler import DetailDBCrawler
+from app.crawler.contact_crawler import ContactCrawler
+from app.crawler.detail_crawler import DetailCrawler
 from app.crawler.list_crawler import ListCrawler
 from app.extractor.email_extractor import EmailExtractor
 from app.extractor.company_details_extractor import CompanyDetailsExtractor
@@ -122,7 +122,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
     """
     try:
         config = CrawlerConfig()
-        detail_crawler = DetailDBCrawler(config)
+        detail_crawler = DetailCrawler(config)
         
         # Tạo event loop mới
         loop = asyncio.new_event_loop()
@@ -227,7 +227,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
     """
     try:
         config = CrawlerConfig()
-        html_crawler = HTMLCrawler(config)
+        contact_crawler = ContactCrawler(config)
         db_manager = DatabaseManager()
         
         # Tạo event loop mới
@@ -236,7 +236,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
         
         try:
             # Create fresh browser for this task to prevent context errors
-            loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
+            loop.run_until_complete(contact_crawler.create_fresh_browser_for_industry())
             # Get company details từ DB
             company_details = db_manager.get_company_details_for_contact_crawl(batch_size)
             
@@ -263,7 +263,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     memory_before = psutil.Process().memory_info().rss / 1024 / 1024  # MB
                     
                     # Crawl contact pages batch
-                    batch_results = loop.run_until_complete(html_crawler.crawl_batch_from_details(batch))
+                    batch_results = loop.run_until_complete(contact_crawler.crawl_batch_from_details(batch))
                     
                     processed += batch_results['total']
                     successful += batch_results['successful']
@@ -292,9 +292,9 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     # Memory threshold check
                     if memory_after_gc > 1000:  # 1GB threshold
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
-                        loop.run_until_complete(html_crawler.cleanup())
+                        loop.run_until_complete(contact_crawler.cleanup())
                         time.sleep(2)
-                        loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
+                        loop.run_until_complete(contact_crawler.create_fresh_browser_for_industry())
                     
                 except Exception as batch_error:
                     logger.error(f"Contact batch {i//batch_size + 1} failed: {batch_error}")
@@ -303,9 +303,9 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     
                     # Force cleanup on error
                     try:
-                        loop.run_until_complete(html_crawler.cleanup())
+                        loop.run_until_complete(contact_crawler.cleanup())
                         time.sleep(1)
-                        loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
+                        loop.run_until_complete(contact_crawler.create_fresh_browser_for_industry())
                     except:
                         pass
                     
@@ -313,7 +313,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     continue
             
             # Cleanup
-            loop.run_until_complete(html_crawler.cleanup())
+            loop.run_until_complete(contact_crawler.cleanup())
             
             return {
                 'status': 'completed',

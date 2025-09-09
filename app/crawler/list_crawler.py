@@ -23,7 +23,7 @@ class ListCrawler(BaseCrawler):
         for i in range(self.max_retries):
             try:
                 await page.goto(url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")
-                await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+                await self._wait_for_network(page)
                 links = await page.locator(self.config.get_xpath("pagination_links")).all()
                 if links:
                     href = await links[-2].get_attribute("href")
@@ -50,6 +50,22 @@ class ListCrawler(BaseCrawler):
             return int(m.group()) if m else 1
         except Exception:
             return 1
+
+    async def _wait_for_network(self, page, timeout: int = None):
+        """Safely wait for networkidle with fallback to domcontentloaded"""
+        if timeout is None:
+            timeout = self.config.processing_config["network_timeout"]
+        
+        try:
+            await page.wait_for_load_state("networkidle", timeout=timeout)
+        except Exception as network_error:
+            error_str = str(network_error)
+            if "Target page, context or browser has been closed" in error_str or "TargetClosedError" in error_str:
+                logger.warning(f"Networkidle failed due to browser closure: {network_error}")
+                raise  # Re-raise to trigger browser restart
+            else:
+                logger.warning(f"Networkidle timeout, falling back to domcontentloaded: {network_error}")
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
 
     async def _wait_for_select2_ready(self, page, max_wait: int = None) -> bool:
         """Đợi Select2 dropdown sẵn sàng với timeout adaptive"""
@@ -149,7 +165,7 @@ class ListCrawler(BaseCrawler):
                         logger.info(f"Loading page with timeout={timeout}ms, network_timeout={network_timeout}ms")
                         await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
                         logger.info("Page loaded, waiting for network idle...")
-                        await page.wait_for_load_state("networkidle", timeout=network_timeout)
+                        await self._wait_for_network(page, network_timeout)
                         logger.info("Network idle achieved")
                         
                         # 2. Đợi Select2 sẵn sàng
@@ -270,7 +286,7 @@ class ListCrawler(BaseCrawler):
                 pass
 
         # chờ load danh sách sau filter
-        await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+        await self._wait_for_networkidle_safe(page)
         # đợi anchor công ty xuất hiện (nếu có)
         try:
             await page.wait_for_selector(self.config.get_xpath("company_links"), timeout=5000)
@@ -310,7 +326,7 @@ class ListCrawler(BaseCrawler):
                         await page.goto(
                             page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
                         )
-                        await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+                        await self._wait_for_network(page)
                         locs = await page.locator(self.config.get_xpath("company_links")).all()
                         return [
                             await a.get_attribute("href")
@@ -328,7 +344,7 @@ class ListCrawler(BaseCrawler):
                 await page.goto(
                     page_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded"
                 )
-                await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+                await self._wait_for_network(page)
                 locs = await page.locator(self.config.get_xpath("company_links")).all()
                 return [
                     await a.get_attribute("href")
@@ -352,7 +368,9 @@ class ListCrawler(BaseCrawler):
             try:
                 # Mở trang gốc
                 await page.goto(base_url, timeout=self.config.processing_config["timeout"], wait_until="domcontentloaded")
-                await page.wait_for_load_state("networkidle", timeout=self.config.processing_config["network_timeout"])
+                
+                # Wait for network idle with safe fallback
+                await self._wait_for_network(page)
 
                 # Apply filter bằng UI
                 await self._apply_industry_filter(page, industry_name)

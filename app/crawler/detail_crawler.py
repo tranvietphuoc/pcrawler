@@ -9,11 +9,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class DetailDBCrawler(BaseCrawler):
+class DetailCrawler(BaseCrawler):
     def __init__(self, config: CrawlerConfig = None):
         super().__init__(config)
         self.db_manager = DatabaseManager()
-        self.max_requests_per_browser = 100  # Override for DetailDBCrawler - balance memory vs stability
+        self.max_requests_per_browser = 100  # Override for DetailCrawler - balance memory vs stability
         
     # Removed _get_crawler() - now using context_manager.get_crawl4ai_crawler() directly
     
