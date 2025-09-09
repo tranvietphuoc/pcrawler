@@ -3,6 +3,7 @@ from typing import List, Tuple
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
 from .base_crawler import BaseCrawler
+from .browser_defender import BrowserDefender
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -56,16 +57,26 @@ class ListCrawler(BaseCrawler):
         if timeout is None:
             timeout = self.config.processing_config["network_timeout"]
         
-        try:
-            await page.wait_for_load_state("networkidle", timeout=timeout)
-        except Exception as network_error:
-            error_str = str(network_error)
-            if "Target page, context or browser has been closed" in error_str or "TargetClosedError" in error_str:
-                logger.warning(f"Networkidle failed due to browser closure: {network_error}")
-                raise  # Re-raise to trigger browser restart
-            else:
-                logger.warning(f"Networkidle timeout, falling back to domcontentloaded: {network_error}")
-                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+        # Use BrowserDefender to prevent TargetClosedError
+        async def network_operation():
+            try:
+                await page.wait_for_load_state("networkidle", timeout=timeout)
+            except Exception as network_error:
+                error_str = str(network_error)
+                if "Target page, context or browser has been closed" in error_str or "TargetClosedError" in error_str:
+                    logger.warning(f"Networkidle failed due to browser closure: {network_error}")
+                    raise  # Re-raise to trigger browser restart
+                else:
+                    logger.warning(f"Networkidle timeout, falling back to domcontentloaded: {network_error}")
+                    await page.wait_for_load_state("domcontentloaded", timeout=10000)
+        
+        await BrowserDefender.safe_page_operation(
+            page, 
+            network_operation, 
+            "wait_for_network", 
+            max_retries=1, 
+            timeout=timeout + 10000
+        )
 
     async def _wait_for_select2_ready(self, page, max_wait: int = None) -> bool:
         """Đợi Select2 dropdown sẵn sàng với timeout adaptive"""
@@ -168,7 +179,19 @@ class ListCrawler(BaseCrawler):
                         network_timeout = self.config.processing_config.get("network_timeout", 45000)
                         
                         logger.info(f"Loading page with timeout={timeout}ms, network_timeout={network_timeout}ms")
-                        await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
+                        
+                        # Use BrowserDefender to prevent TargetClosedError
+                        async def goto_operation():
+                            await page.goto(base_url, timeout=timeout, wait_until="domcontentloaded")
+                        
+                        await BrowserDefender.safe_page_operation(
+                            page, 
+                            goto_operation, 
+                            "page_goto_main", 
+                            max_retries=2, 
+                            timeout=timeout + 10000
+                        )
+                        
                         logger.info("Page loaded, waiting for network idle...")
                         await self._wait_for_network(page, network_timeout)
                         logger.info("Network idle achieved")
