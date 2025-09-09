@@ -2,6 +2,7 @@ import asyncio
 import pandas as pd
 import gc
 import psutil
+import time
 from celery import Celery
 from app.crawler.html_crawler import HTMLCrawler
 from app.crawler.detail_db_crawler import DetailDBCrawler
@@ -76,7 +77,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                     if memory_after_gc > 1000:  # 1GB threshold
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
                         detail_crawler.cleanup()
-                        await asyncio.sleep(2)
+                        time.sleep(2)
                         loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
                     
                 except Exception as batch_error:
@@ -87,7 +88,7 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                     # Force cleanup on error
                     try:
                         detail_crawler.cleanup()
-                        await asyncio.sleep(1)
+                        time.sleep(1)
                         loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
                     except:
                         pass
@@ -194,7 +195,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     if memory_after_gc > 1000:  # 1GB threshold
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
                         html_crawler.cleanup()
-                        await asyncio.sleep(2)
+                        time.sleep(2)
                         loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
                     
                 except Exception as batch_error:
@@ -205,7 +206,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     # Force cleanup on error
                     try:
                         html_crawler.cleanup()
-                        await asyncio.sleep(1)
+                        time.sleep(1)
                         loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
                     except:
                         pass

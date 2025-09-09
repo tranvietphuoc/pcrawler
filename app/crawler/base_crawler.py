@@ -88,7 +88,7 @@ class BaseCrawler:
         # Start fresh browser
         try:
             self.current_playwright = await async_playwright().start()
-                    self.current_browser = await self.current_playwright.chromium.launch(
+            self.current_browser = await self.current_playwright.chromium.launch(
                         headless=True,
                         args=[
                             "--no-sandbox",
