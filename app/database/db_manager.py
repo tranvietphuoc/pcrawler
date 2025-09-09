@@ -1,6 +1,8 @@
 import sqlite3
 import json
 import os
+import threading
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -9,6 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Removed global lock - using SQLite WAL mode + busy_timeout for concurrency
+
 class DatabaseManager:
     def __init__(self, db_path: str = "data/crawler.db"):
         self.db_path = db_path
@@ -16,11 +20,13 @@ class DatabaseManager:
     
     def get_connection(self) -> sqlite3.Connection:
         """Return SQLite connection with WAL and busy timeout to reduce locks."""
-        conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+        conn = sqlite3.connect(self.db_path, timeout=60, check_same_thread=False)
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
-            conn.execute("PRAGMA busy_timeout=5000;")
+            conn.execute("PRAGMA busy_timeout=30000;")  # Tăng từ 5s lên 30s
+            conn.execute("PRAGMA cache_size=10000;")    # Tăng cache size
+            conn.execute("PRAGMA temp_store=MEMORY;")   # Temp tables in memory
         except Exception:
             pass
         return conn
@@ -42,27 +48,43 @@ class DatabaseManager:
     
     def store_detail_html(self, company_name: str, company_url: str, html_content: str, industry: str = None) -> int:
         """Store detail page HTML content and return record ID"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO detail_html_storage (company_name, company_url, industry, html_content, status)
-                VALUES (?, ?, ?, ?, 'pending')
-            """, (company_name, company_url, industry, html_content))
-            record_id = cursor.lastrowid
-            conn.commit()
-            return record_id
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO detail_html_storage (company_name, company_url, industry, html_content, status)
+                    VALUES (?, ?, ?, ?, 'pending')
+                """, (company_name, company_url, industry, html_content))
+                record_id = cursor.lastrowid
+                conn.commit()
+                return record_id
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                logger.warning(f"Database locked, retrying store_detail_html for {company_name}")
+                time.sleep(0.1)
+                return self.store_detail_html(company_name, company_url, html_content, industry)
+            else:
+                raise
     
     def store_contact_html(self, company_name: str, url: str, url_type: str, html_content: str) -> int:
         """Store contact page HTML content and return record ID"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO contact_html_storage (company_name, url, url_type, html_content, status)
-                VALUES (?, ?, ?, ?, 'pending')
-            """, (company_name, url, url_type, html_content))
-            record_id = cursor.lastrowid
-            conn.commit()
-            return record_id
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO contact_html_storage (company_name, url, url_type, html_content, status)
+                    VALUES (?, ?, ?, ?, 'pending')
+                """, (company_name, url, url_type, html_content))
+                record_id = cursor.lastrowid
+                conn.commit()
+                return record_id
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                logger.warning(f"Database locked, retrying store_contact_html for {company_name}")
+                time.sleep(0.1)
+                return self.store_contact_html(company_name, url, url_type, html_content)
+            else:
+                raise
     
     def get_pending_detail_html(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get pending detail HTML records for company details extraction"""
@@ -121,32 +143,51 @@ class DatabaseManager:
                             description: str = None, created_year: str = None, revenue: str = None, 
                             scale: str = None):
         """Store company details extracted from detail page"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO company_details 
-                (detail_html_id, company_name, company_url, address, phone, website, facebook, 
-                 linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (detail_html_id, company_name, company_url, address, phone, website, facebook, 
-                  linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale))
-            conn.commit()
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO company_details 
+                    (detail_html_id, company_name, company_url, address, phone, website, facebook, 
+                     linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (detail_html_id, company_name, company_url, address, phone, website, facebook, 
+                      linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale))
+                conn.commit()
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                logger.warning(f"Database locked, retrying store_company_details for {company_name}")
+                time.sleep(0.1)
+                return self.store_company_details(detail_html_id, company_name, company_url, address, 
+                                                phone, website, facebook, linkedin, tiktok, youtube, 
+                                                instagram, description, created_year, revenue, scale)
+            else:
+                raise
 
     def update_detail_industry(self, detail_html_id: int, industry: str):
         """Update industry in detail_html_storage if missing."""
         if not industry:
             return
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE detail_html_storage
-                SET industry = COALESCE(NULLIF(industry, ''), ?)
-                WHERE id = ?
-                """,
-                (industry, detail_html_id),
-            )
-            conn.commit()
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE detail_html_storage
+                    SET industry = COALESCE(NULLIF(industry, ''), ?)
+                    WHERE id = ?
+                    """,
+                    (industry, detail_html_id),
+                )
+                conn.commit()
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                logger.warning(f"Database locked, retrying update_detail_industry for ID {detail_html_id}")
+                import time
+                time.sleep(0.1)
+                return self.update_detail_industry(detail_html_id, industry)
+            else:
+                raise
     
     def store_email_extraction(self, contact_html_id: int, company_name: str, 
                              extracted_emails: List[str], email_source: str, 
@@ -154,16 +195,25 @@ class DatabaseManager:
         """Store email extraction results"""
         emails_json = json.dumps(extracted_emails)
         
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO email_extraction 
-                (contact_html_id, company_name, extracted_emails, email_source, 
-                 extraction_method, confidence_score)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (contact_html_id, company_name, emails_json, email_source, 
-                  extraction_method, confidence_score))
-            conn.commit()
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO email_extraction 
+                    (contact_html_id, company_name, extracted_emails, email_source, 
+                     extraction_method, confidence_score)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (contact_html_id, company_name, emails_json, email_source, 
+                      extraction_method, confidence_score))
+                conn.commit()
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                logger.warning(f"Database locked, retrying store_email_extraction for {company_name}")
+                time.sleep(0.1)
+                return self.store_email_extraction(contact_html_id, company_name, extracted_emails, 
+                                                 email_source, extraction_method, confidence_score)
+            else:
+                raise
     
     def get_extraction_results(self, company_name: str = None) -> List[Dict[str, Any]]:
         """Get email extraction results"""

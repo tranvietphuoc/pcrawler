@@ -88,20 +88,31 @@ class BaseCrawler:
         # Start fresh browser
         try:
             self.current_playwright = await async_playwright().start()
-            self.current_browser = await self.current_playwright.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--memory-pressure-off",
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    "--disable-web-security",
-                    "--disable-features=VizDisplayCompositor"
-                ],
-            )
+                    self.current_browser = await self.current_playwright.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--no-sandbox",
+                            "--disable-setuid-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--memory-pressure-off",
+                            "--disable-background-timer-throttling",
+                            "--disable-backgrounding-occluded-windows",
+                            "--disable-renderer-backgrounding",
+                            "--disable-web-security",
+                            "--disable-features=VizDisplayCompositor",
+                            "--disable-gpu",
+                            "--disable-software-rasterizer",
+                            "--disable-background-networking",
+                            "--disable-default-apps",
+                            "--disable-extensions",
+                            "--disable-sync",
+                            "--disable-translate",
+                            "--hide-scrollbars",
+                            "--mute-audio",
+                            "--no-first-run",
+                            "--disable-ipc-flooding-protection"
+                        ],
+                    )
             self.request_count = 0
             logger.info(f"{self.__class__.__name__} Playwright browser restarted successfully")
         except Exception as e:

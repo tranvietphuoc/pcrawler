@@ -42,7 +42,7 @@ crawl4ai:
 
 processing:
   # batch_size: 30 (cũ)
-  batch_size: 100  # Tăng từ 30 lên 100 - giảm số tasks
+  batch_size: 50   # Giảm từ 200 xuống 50 - tối ưu memory per task
   # write_batch_size: 150 (cũ)
   write_batch_size: 200  # Tăng từ 150 lên 200
   # max_concurrent_pages: 5 (cũ)

@@ -238,11 +238,20 @@ async def run(
     logger.info(f"Total unique company links collected: {total_companies}")
     logger.info(f"Submitted {len(detail_tasks)} detail batches. Waiting for completion...")
 
-    for t in detail_tasks:
+    # Wait for all detail batches to complete (non-blocking with progress)
+    completed = 0
+    failed = 0
+    for i, t in enumerate(detail_tasks):
         try:
-            t.get(timeout=3600)
+            result = t.get(timeout=3600)
+            completed += 1
+            if i % 10 == 0:  # Log progress every 10 batches
+                logger.info(f"Detail batches progress: {completed}/{len(detail_tasks)} completed, {failed} failed")
         except Exception as e:
-            logger.warning(f"Detail batch failed: {e}")
+            failed += 1
+            logger.warning(f"Detail batch {i+1} failed: {e}")
+    
+    logger.info(f"PHASE 1 COMPLETED: {completed} successful, {failed} failed out of {len(detail_tasks)} batches")
 
     # PHASE 2: Extract company details from DB
     logger.info("Extracting company details from stored HTML...")

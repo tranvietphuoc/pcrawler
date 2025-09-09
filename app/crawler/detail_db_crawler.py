@@ -13,7 +13,7 @@ class DetailDBCrawler(BaseCrawler):
     def __init__(self, config: CrawlerConfig = None):
         super().__init__(config)
         self.db_manager = DatabaseManager()
-        self.max_requests_per_browser = 200  # Override for DetailDBCrawler
+        self.max_requests_per_browser = 100  # Override for DetailDBCrawler - balance memory vs stability
         
     async def _get_crawler(self):
         """Get Crawl4AI crawler using base class method"""

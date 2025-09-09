@@ -1,5 +1,7 @@
 import asyncio
 import pandas as pd
+import gc
+import psutil
 from celery import Celery
 from app.crawler.html_crawler import HTMLCrawler
 from app.crawler.detail_db_crawler import DetailDBCrawler
@@ -35,30 +37,63 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
             successful = 0
             failed = 0
             
-            # Process theo batch
+            # Process theo batch với error handling
             for i in range(0, total_companies, batch_size):
                 batch = companies[i:i + batch_size]
                 
-                # Crawl detail pages batch (chỉ lưu HTML, không extract)
-                batch_results = loop.run_until_complete(detail_crawler.crawl_batch(batch))
-                
-                processed += batch_results['total']
-                successful += batch_results['successful']
-                failed += batch_results['failed']
-                
-                # Update progress
-                self.update_state(
-                    state='PROGRESS',
-                    meta={
-                        'current': processed,
-                        'total': total_companies,
-                        'successful': successful,
-                        'failed': failed,
-                        'status': f'Crawled detail pages batch {i//batch_size + 1}'
-                    }
-                )
-                
-                logger.info(f"Detail batch {i//batch_size + 1}: {batch_results['successful']}/{batch_results['total']} successful")
+                try:
+                    # Memory monitoring
+                    memory_before = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                    
+                    # Crawl detail pages batch (chỉ lưu HTML, không extract)
+                    batch_results = loop.run_until_complete(detail_crawler.crawl_batch(batch))
+                    
+                    processed += batch_results['total']
+                    successful += batch_results['successful']
+                    failed += batch_results['failed']
+                    
+                    # Memory cleanup after each batch
+                    memory_after = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                    gc.collect()  # Force garbage collection
+                    memory_after_gc = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                    
+                    # Update progress
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={
+                            'current': processed,
+                            'total': total_companies,
+                            'successful': successful,
+                            'failed': failed,
+                            'memory_mb': round(memory_after_gc, 1),
+                            'status': f'Crawled detail pages batch {i//batch_size + 1}'
+                        }
+                    )
+                    
+                    logger.info(f"Detail batch {i//batch_size + 1}: {batch_results['successful']}/{batch_results['total']} successful, Memory: {memory_before:.1f}MB → {memory_after_gc:.1f}MB")
+                    
+                    # Memory threshold check
+                    if memory_after_gc > 1000:  # 1GB threshold
+                        logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
+                        detail_crawler.cleanup()
+                        await asyncio.sleep(2)
+                        loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
+                    
+                except Exception as batch_error:
+                    logger.error(f"Detail batch {i//batch_size + 1} failed: {batch_error}")
+                    failed += len(batch)
+                    processed += len(batch)
+                    
+                    # Force cleanup on error
+                    try:
+                        detail_crawler.cleanup()
+                        await asyncio.sleep(1)
+                        loop.run_until_complete(detail_crawler.create_fresh_browser_for_industry())
+                    except:
+                        pass
+                    
+                    # Continue with next batch instead of failing entire task
+                    continue
             
             # Cleanup
             detail_crawler.cleanup()
@@ -120,30 +155,63 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
             successful = 0
             failed = 0
             
-            # Process theo batch
+            # Process theo batch với error handling
             for i in range(0, total_companies, batch_size):
                 batch = company_details[i:i + batch_size]
                 
-                # Crawl contact pages batch
-                batch_results = loop.run_until_complete(html_crawler.crawl_batch_from_details(batch))
-                
-                processed += batch_results['total']
-                successful += batch_results['successful']
-                failed += batch_results['failed']
-                
-                # Update progress
-                self.update_state(
-                    state='PROGRESS',
-                    meta={
-                        'current': processed,
-                        'total': total_companies,
-                        'successful': successful,
-                        'failed': failed,
-                        'status': f'Crawled contact pages batch {i//batch_size + 1}'
-                    }
-                )
-                
-                logger.info(f"Contact batch {i//batch_size + 1}: {batch_results['successful']}/{batch_results['total']} successful")
+                try:
+                    # Memory monitoring
+                    memory_before = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                    
+                    # Crawl contact pages batch
+                    batch_results = loop.run_until_complete(html_crawler.crawl_batch_from_details(batch))
+                    
+                    processed += batch_results['total']
+                    successful += batch_results['successful']
+                    failed += batch_results['failed']
+                    
+                    # Memory cleanup after each batch
+                    memory_after = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                    gc.collect()  # Force garbage collection
+                    memory_after_gc = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                    
+                    # Update progress
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={
+                            'current': processed,
+                            'total': total_companies,
+                            'successful': successful,
+                            'failed': failed,
+                            'memory_mb': round(memory_after_gc, 1),
+                            'status': f'Crawled contact pages batch {i//batch_size + 1}'
+                        }
+                    )
+                    
+                    logger.info(f"Contact batch {i//batch_size + 1}: {batch_results['successful']}/{batch_results['total']} successful, Memory: {memory_before:.1f}MB → {memory_after_gc:.1f}MB")
+                    
+                    # Memory threshold check
+                    if memory_after_gc > 1000:  # 1GB threshold
+                        logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
+                        html_crawler.cleanup()
+                        await asyncio.sleep(2)
+                        loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
+                    
+                except Exception as batch_error:
+                    logger.error(f"Contact batch {i//batch_size + 1} failed: {batch_error}")
+                    failed += len(batch)
+                    processed += len(batch)
+                    
+                    # Force cleanup on error
+                    try:
+                        html_crawler.cleanup()
+                        await asyncio.sleep(1)
+                        loop.run_until_complete(html_crawler.create_fresh_browser_for_industry())
+                    except:
+                        pass
+                    
+                    # Continue with next batch instead of failing entire task
+                    continue
             
             # Cleanup
             html_crawler.cleanup()
