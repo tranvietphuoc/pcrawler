@@ -25,7 +25,8 @@ class ContactCrawler(BaseCrawler):
         
         # Use Async Context Manager for Crawl4AI crawler
         user_agent = await self._get_random_user_agent()
-        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent) as crawler:
+        viewport = await self._get_random_viewport()
+        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent, viewport) as crawler:
             try:
                 if url_type == "facebook":
                     # Facebook crawling với safe network handling
@@ -206,7 +207,8 @@ class ContactCrawler(BaseCrawler):
         
         # Use Async Context Manager for Crawl4AI crawler
         user_agent = await self._get_random_user_agent()
-        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent) as crawler:
+        viewport = await self._get_random_viewport()
+        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent, viewport) as crawler:
             try:
                 # Crawl Facebook page với auto close login và deep crawling
                 try:
@@ -367,6 +369,9 @@ class ContactCrawler(BaseCrawler):
             company_name = company.get('company_name', '')
             website = company.get('website', '')
             facebook = company.get('facebook', '')
+            
+            # Random delay between companies
+            await asyncio.sleep(random.uniform(2, 5))
             
             # Crawl website
             if website and website not in ("N/A", ""):

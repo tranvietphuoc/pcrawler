@@ -59,45 +59,62 @@ class AsyncBrowserContextManager:
                     self._request_counts[crawler_id] = 1
                 
                 # Create new context
-                context = await browser.new_context(
-                    user_agent=user_agent,
-                    viewport=viewport,
-                    extra_http_headers={
-                        'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                        'Connection': 'keep-alive',
-                        'Upgrade-Insecure-Requests': '1',
-                    }
-                )
+                # Create context with retry logic
+                context = None
+                for attempt in range(3):
+                    try:
+                        context = await browser.new_context(
+                            user_agent=user_agent,
+                            viewport=viewport,
+                            extra_http_headers={
+                                'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+                                'Accept-Encoding': 'gzip, deflate, br',
+                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                                'Connection': 'keep-alive',
+                                'Upgrade-Insecure-Requests': '1',
+                            }
+                        )
+                        break
+                    except Exception as e:
+                        logger.warning(f"Failed to create context for {crawler_id} (attempt {attempt + 1}/3): {e}")
+                        if attempt < 2:
+                            await asyncio.sleep(1)
+                        else:
+                            raise
                 
                 # Track active context
                 self._active_contexts[crawler_id] = self._active_contexts.get(crawler_id, 0) + 1
                 
-                # Create page with error handling
-                try:
-                    page = await context.new_page()
-                except Exception as e:
-                    logger.warning(f"Failed to create page for {crawler_id}: {e}")
-                    # Try to recreate context if page creation fails
+                # Create page with retry logic
+                page = None
+                for attempt in range(3):
                     try:
-                        await context.close()
-                    except:
-                        pass
-                    
-                    # Recreate context
-                    context = await browser.new_context(
-                        user_agent=user_agent,
-                        viewport=viewport,
-                        extra_http_headers={
-                            'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
-                            'Accept-Encoding': 'gzip, deflate, br',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                            'Connection': 'keep-alive',
-                            'Upgrade-Insecure-Requests': '1',
-                        }
-                    )
-                    page = await context.new_page()
+                        page = await context.new_page()
+                        break
+                    except Exception as e:
+                        logger.warning(f"Failed to create page for {crawler_id} (attempt {attempt + 1}/3): {e}")
+                        if attempt < 2:
+                            # Try to recreate context if page creation fails
+                            try:
+                                await context.close()
+                            except:
+                                pass
+                            
+                            # Recreate context
+                            context = await browser.new_context(
+                                user_agent=user_agent,
+                                viewport=viewport,
+                                extra_http_headers={
+                                    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+                                    'Accept-Encoding': 'gzip, deflate, br',
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                                    'Connection': 'keep-alive',
+                                    'Upgrade-Insecure-Requests': '1',
+                                }
+                            )
+                            await asyncio.sleep(1)
+                        else:
+                            raise
                 
                 logger.debug(f"Created context for {crawler_id}, active contexts: {self._active_contexts[crawler_id]}")
                 
@@ -118,14 +135,14 @@ class AsyncBrowserContextManager:
                     logger.warning(f"Error closing context for {crawler_id}: {e}")
     
     @asynccontextmanager
-    async def get_crawl4ai_crawler(self, crawler_id: str, user_agent: str):
+    async def get_crawl4ai_crawler(self, crawler_id: str, user_agent: str, viewport: dict = None):
         """Async context manager for Crawl4AI crawler with automatic cleanup"""
         crawler = None
         
         try:
             async with self._lock:
                 # Get or create crawler
-                crawler = await self._get_or_create_crawl4ai_crawler(crawler_id, user_agent)
+                crawler = await self._get_or_create_crawl4ai_crawler(crawler_id, user_agent, viewport)
                 
                 logger.debug(f"Using Crawl4AI crawler for {crawler_id}")
                 
@@ -145,51 +162,53 @@ class AsyncBrowserContextManager:
             if len(self._browsers) >= self._max_browsers:
                 await self._close_oldest_browser()
             
-            # Create new browser
+            # Create new browser with minimal, stable arguments
             playwright = await async_playwright().start()
             browser = await playwright.chromium.launch(
                 headless=True,
                 args=[
+                    # Essential for Docker/headless
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
+                    
+                    # Memory and performance
                     "--memory-pressure-off",
+                    "--max_old_space_size=2048",
+                    "--disable-gpu",
+                    
+                    # Background processes
                     "--disable-background-timer-throttling",
                     "--disable-backgrounding-occluded-windows",
                     "--disable-renderer-backgrounding",
-                    "--disable-features=TranslateUI",
-                    "--disable-ipc-flooding-protection",
-                    "--disable-gpu",
-                    "--disable-software-rasterizer",
                     "--disable-background-networking",
-                    "--disable-default-apps",
+                    "--disable-background-mode",
+                    
+                    # Features to disable
                     "--disable-extensions",
+                    "--disable-default-apps",
                     "--disable-sync",
                     "--disable-translate",
-                    "--hide-scrollbars",
-                    "--mute-audio",
-                    "--no-first-run",
-                    "--disable-web-security",
-                    "--disable-features=VizDisplayCompositor",
-                    "--disable-hang-monitor",
-                    "--disable-prompt-on-repost",
-                    "--disable-client-side-phishing-detection",
+                    "--disable-features=TranslateUI,BlinkGenPropertyTrees",
                     "--disable-component-extensions-with-background-pages",
-                    "--disable-background-mode",
                     "--disable-plugins-discovery",
-                    "--disable-preconnect",
-                    "--disable-print-preview",
-                    "--disable-speech-api",
-                    "--disable-file-system",
                     "--disable-permissions-api",
                     "--disable-presentation-api",
-                    "--disable-remote-fonts",
                     "--disable-shared-workers",
                     "--disable-webgl",
                     "--disable-webgl2",
-                    "--disable-xss-auditor",
-                    "--no-zygote",
-                    "--single-process",
+                    
+                    # Security and detection
+                    "--disable-web-security",
+                    "--disable-client-side-phishing-detection",
+                    "--disable-blink-features=AutomationControlled",
+                    
+                    # UI and audio
+                    "--hide-scrollbars",
+                    "--mute-audio",
+                    "--no-first-run",
+                    
+                    # Logging and debugging
                     "--disable-logging",
                     "--disable-gpu-logging",
                     "--silent",
@@ -197,15 +216,25 @@ class AsyncBrowserContextManager:
                     "--disable-crash-reporter",
                     "--disable-in-process-stack-traces",
                     "--disable-dev-tools",
-                    "--disable-breakpad",
-                    "--disable-component-update",
+                    
+                    # Network and connectivity
+                    "--disable-preconnect",
+                    "--disable-remote-fonts",
                     "--disable-domain-reliability",
+                    "--disable-component-update",
+                    "--no-report-upload",
+                    
+                    # System integration
+                    "--use-mock-keychain",
                     "--force-color-profile=srgb",
                     "--metrics-recording-only",
-                    "--no-report-upload",
-                    "--use-mock-keychain",
-                    "--disable-blink-features=AutomationControlled",
-                    "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    
+                    # Process management
+                    "--no-zygote",
+                    "--disable-hang-monitor",
+                    "--disable-prompt-on-repost",
+                    "--disable-xss-auditor",
+                    "--disable-breakpad"
                 ]
             )
             self._browsers[crawler_id] = browser
@@ -214,7 +243,7 @@ class AsyncBrowserContextManager:
         
         return self._browsers[crawler_id]
     
-    async def _get_or_create_crawl4ai_crawler(self, crawler_id: str, user_agent: str) -> AsyncWebCrawler:
+    async def _get_or_create_crawl4ai_crawler(self, crawler_id: str, user_agent: str, viewport: dict = None) -> AsyncWebCrawler:
         """Get or create Crawl4AI crawler with proper resource management"""
         if crawler_id not in self._crawl4ai_crawlers:
             # Check if we need to close an old crawler
@@ -227,46 +256,48 @@ class AsyncBrowserContextManager:
                 browser_type="chromium",
                 headless=True,
                 browser_args=[
+                    # Essential for Docker/headless
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
+                    
+                    # Memory and performance
                     "--memory-pressure-off",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    
+                    # Background processes
                     "--disable-background-timer-throttling",
                     "--disable-backgrounding-occluded-windows",
                     "--disable-renderer-backgrounding",
-                    "--disable-features=TranslateUI",
-                    "--disable-ipc-flooding-protection",
-                    "--disable-gpu",
-                    "--disable-software-rasterizer",
                     "--disable-background-networking",
-                    "--disable-default-apps",
+                    "--disable-background-mode",
+                    
+                    # Features to disable
                     "--disable-extensions",
+                    "--disable-default-apps",
                     "--disable-sync",
                     "--disable-translate",
-                    "--hide-scrollbars",
-                    "--mute-audio",
-                    "--no-first-run",
-                    "--disable-web-security",
-                    "--disable-features=VizDisplayCompositor",
-                    "--disable-hang-monitor",
-                    "--disable-prompt-on-repost",
-                    "--disable-client-side-phishing-detection",
+                    "--disable-features=TranslateUI,VizDisplayCompositor",
                     "--disable-component-extensions-with-background-pages",
-                    "--disable-background-mode",
                     "--disable-plugins-discovery",
-                    "--disable-preconnect",
-                    "--disable-print-preview",
-                    "--disable-speech-api",
-                    "--disable-file-system",
                     "--disable-permissions-api",
                     "--disable-presentation-api",
-                    "--disable-remote-fonts",
                     "--disable-shared-workers",
                     "--disable-webgl",
                     "--disable-webgl2",
-                    "--disable-xss-auditor",
-                    "--no-zygote",
-                    "--single-process",
+                    
+                    # Security and detection
+                    "--disable-web-security",
+                    "--disable-client-side-phishing-detection",
+                    "--disable-blink-features=AutomationControlled",
+                    
+                    # UI and audio
+                    "--hide-scrollbars",
+                    "--mute-audio",
+                    "--no-first-run",
+                    
+                    # Logging and debugging
                     "--disable-logging",
                     "--disable-gpu-logging",
                     "--silent",
@@ -274,15 +305,25 @@ class AsyncBrowserContextManager:
                     "--disable-crash-reporter",
                     "--disable-in-process-stack-traces",
                     "--disable-dev-tools",
-                    "--disable-breakpad",
-                    "--disable-component-update",
+                    
+                    # Network and connectivity
+                    "--disable-preconnect",
+                    "--disable-remote-fonts",
                     "--disable-domain-reliability",
+                    "--disable-component-update",
+                    "--no-report-upload",
+                    
+                    # System integration
+                    "--use-mock-keychain",
                     "--force-color-profile=srgb",
                     "--metrics-recording-only",
-                    "--no-report-upload",
-                    "--use-mock-keychain",
-                    "--disable-blink-features=AutomationControlled",
-                    "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    
+                    # Process management
+                    "--no-zygote",
+                    "--disable-hang-monitor",
+                    "--disable-prompt-on-repost",
+                    "--disable-xss-auditor",
+                    "--disable-breakpad"
                 ]
             )
             self._crawl4ai_crawlers[crawler_id] = crawler

@@ -25,9 +25,13 @@ class DetailCrawler(BaseCrawler):
         if not company_url.startswith(("http://", "https://")):
             company_url = "https://" + company_url
         
+        # Random delay between requests
+        await asyncio.sleep(random.uniform(1, 3))
+        
         # Use Async Context Manager for Crawl4AI crawler
         user_agent = await self._get_random_user_agent()
-        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent) as crawler:
+        viewport = await self._get_random_viewport()
+        async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent, viewport) as crawler:
             try:
                 # Crawl detail page HTML content
                 result = await crawler.arun(url=company_url)

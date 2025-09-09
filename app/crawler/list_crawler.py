@@ -409,6 +409,9 @@ class ListCrawler(BaseCrawler):
             
             for page_url in batch_urls:
                 try:
+                    # Random delay between pages
+                    await asyncio.sleep(random.uniform(1, 2))
+                    
                     links = await self.get_company_links_for_page(page_url, None)  # Không reuse page
                     if isinstance(links, list):
                         for link in links:
