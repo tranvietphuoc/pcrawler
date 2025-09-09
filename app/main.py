@@ -60,12 +60,32 @@ async def run(
     detail_tasks = []
     total_companies = 0
     all_company_links: List[Dict[str, Any]] = []
+    
+    # Load existing checkpoints
+    import json
+    import os
+    checkpoint_dir = "/tmp"
+    if os.path.exists(checkpoint_dir):
+        for filename in os.listdir(checkpoint_dir):
+            if filename.startswith("checkpoint_") and filename.endswith(".json"):
+                try:
+                    with open(os.path.join(checkpoint_dir, filename), 'r') as f:
+                        checkpoint_data = json.load(f)
+                        if checkpoint_data:
+                            industry_name = filename.replace("checkpoint_", "").replace(".json", "").split("_")[0]
+                            all_company_links.extend(checkpoint_data)
+                            logger.info(f"Loaded checkpoint: {industry_name} -> {len(checkpoint_data)} links")
+                except Exception as e:
+                    logger.warning(f"Failed to load checkpoint {filename}: {e}")
+    
+    if all_company_links:
+        logger.info(f"Loaded {len(all_company_links)} links from checkpoints")
     async def fetch_links_with_retry(ind_id: str, ind_name: str, pass_no: int = 1) -> List[str]:
         # Adaptive retries/timeouts per pass (tăng để giảm miss ở industry lớn)
         if pass_no == 1:
-            retries, timeout_s, delay_s = 4, 240, 3  # Tăng timeout và retries
+            retries, timeout_s, delay_s = 5, 600, 5  # Tăng timeout lên 10 phút, 5 retries
         else:
-            retries, timeout_s, delay_s = 4, 360, 5  # Tăng timeout và retries
+            retries, timeout_s, delay_s = 6, 900, 10  # Tăng timeout lên 15 phút cho pass 2+
         links_local: List[str] = []
         logger.info(f"[{ind_name}] Start fetching (pass {pass_no}) with timeout={timeout_s}s, retries={retries}")
         for attempt in range(retries + 1):
@@ -247,11 +267,14 @@ async def run(
                 all_company_links.extend(normalized)
                 industry_link_counts[ind_name] = len(normalized)
                 
-                # Submit detail batches
+                # Submit detail batches với delay để tránh overload
                 for i in range(0, len(normalized), batch_size):
                     batch = normalized[i:i+batch_size]
                     t = task_crawl_detail_pages.delay(batch, batch_size)
                     detail_tasks.append(t)
+                    # Delay nhỏ giữa các batch để tránh overload
+                    if i % (batch_size * 5) == 0:  # Delay mỗi 5 batches
+                        await asyncio.sleep(2)
                 
                 await asyncio.sleep(5)  # Longer delay for final attempt
             else:
@@ -274,7 +297,7 @@ async def run(
     failed = 0
     for i, t in enumerate(detail_tasks):
         try:
-            result = t.get(timeout=3600)
+            result = t.get(timeout=7200)  # Tăng timeout lên 2 giờ
             completed += 1
             if i % 10 == 0:  # Log progress every 10 batches
                 logger.info(f"Detail batches progress: {completed}/{len(detail_tasks)} completed, {failed} failed")

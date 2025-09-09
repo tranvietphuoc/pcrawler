@@ -50,6 +50,17 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                     item['industry'] = industry_name
                     normalized.append(item)
             
+            # Lưu checkpoint
+            if normalized:
+                checkpoint_file = f"/tmp/checkpoint_{industry_name}_{pass_no}.json"
+                try:
+                    import json
+                    with open(checkpoint_file, 'w') as f:
+                        json.dump(normalized, f, ensure_ascii=False, indent=2)
+                    logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
+                except Exception as e:
+                    logger.warning(f"Failed to save checkpoint: {e}")
+            
             logger.info(f"Industry '{industry_name}' -> {len(normalized)} companies (pass {pass_no})")
             return normalized
             
@@ -84,14 +95,14 @@ async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id:
     """Optimized async helper for link fetching with smart retry logic"""
     # Adaptive retries/timeouts per pass - tối ưu cho large industries
     if pass_no == 1:
-        retries, timeout_s, delay_s = 2, 90, 2  # Tăng timeout, giảm retries
+        retries, timeout_s, delay_s = 4, 300, 5  # Tăng timeout lên 5 phút, 4 retries
     else:
-        retries, timeout_s, delay_s = 2, 120, 3  # Tăng timeout cho pass 2+
+        retries, timeout_s, delay_s = 5, 600, 10  # Tăng timeout lên 10 phút cho pass 2+
     
     for attempt in range(retries + 1):
         try:
             # Progressive timeout: tăng timeout mỗi attempt
-            current_timeout = timeout_s + (attempt * 30)
+            current_timeout = timeout_s + (attempt * 60)  # Tăng 1 phút mỗi attempt
             logger.info(f"[{industry_name}] Attempt {attempt+1}/{retries+1} (pass {pass_no}) with timeout={current_timeout}s")
             
             links = await asyncio.wait_for(
@@ -232,8 +243,8 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
             
             # Cleanup
             loop.run_until_complete(detail_crawler.cleanup())
-            
-            return {
+        
+        return {
                 'status': 'completed',
                 'total_companies': total_companies,
                 'processed': processed,
@@ -498,7 +509,7 @@ def create_final_results():
             'message': f'Created final results with {count} companies (duplicated for multiple emails)',
             'count': count
         }
-    except Exception as e:
+            except Exception as e:
         logger.error(f"Failed to create final results: {e}")
         return {
             'status': 'failed',
@@ -517,8 +528,8 @@ def get_database_stats():
         
         email_extractor = EmailExtractor()
         summary = email_extractor.get_extraction_summary()
-        
-        return {
+    
+    return {
             'status': 'completed',
             'database_stats': stats,
             'extraction_summary': summary

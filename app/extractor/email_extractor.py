@@ -20,7 +20,7 @@ class EmailExtractor:
             r"[\w\.-]+@[\w\.-]+\.[A-Za-z]{2,}",
         ]
         self.invalid_email = [r"noreply@", r"no-reply@", r"example\.com", r"@\d+\.\d+"]
-        
+
         # Load Crawl4ai queries từ config
         crawl4ai_config = self.config.crawl4ai_config
         self.crawl4ai_queries = {
@@ -57,7 +57,7 @@ class EmailExtractor:
             if re.search(pattern, email_lower):
                 return False
         return True
-    
+
     async def extract_emails_with_crawl4ai_query(self, html_content: str, url_type: str) -> List[str]:
         """Extract emails using Crawl4ai query approach từ HTML content"""
         try:
