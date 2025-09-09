@@ -11,15 +11,17 @@ logger = logging.getLogger(__name__)
 class AsyncBrowserContextManager:
     """Async context manager for browser resources with proper lifecycle management"""
     
-    def __init__(self, max_browsers: int = 3, max_contexts_per_browser: int = 2):
+    def __init__(self, max_browsers: int = 4, max_contexts_per_browser: int = 3):
         self._browsers: Dict[str, Browser] = {}
         self._contexts: Dict[str, List[BrowserContext]] = {}
         self._crawl4ai_crawlers: Dict[str, AsyncWebCrawler] = {}
         self._active_contexts: Dict[str, int] = {}  # Track active contexts per browser
+        self._request_counts: Dict[str, int] = {}  # Track requests per browser
         self._max_browsers = max_browsers
         self._max_contexts_per_browser = max_contexts_per_browser
         self._lock = asyncio.Lock()
-        self._context_lifetime = 30  # seconds
+        self._context_lifetime = 90  # seconds - cân bằng cho 50% tài nguyên
+        self._browser_restart_threshold = 75  # restart browser sau 75 requests
     
     @asynccontextmanager
     async def get_playwright_context(self, crawler_id: str, user_agent: str, viewport: dict):
@@ -31,6 +33,17 @@ class AsyncBrowserContextManager:
             async with self._lock:
                 # Get or create browser
                 browser = await self._get_or_create_browser(crawler_id)
+                
+                # Check if browser needs restart
+                if crawler_id in self._request_counts:
+                    self._request_counts[crawler_id] += 1
+                    if self._request_counts[crawler_id] > self._browser_restart_threshold:
+                        logger.info(f"Restarting browser for {crawler_id} after {self._request_counts[crawler_id]} requests")
+                        await self._restart_browser(crawler_id)
+                        browser = await self._get_or_create_browser(crawler_id)
+                        self._request_counts[crawler_id] = 0
+                else:
+                    self._request_counts[crawler_id] = 1
                 
                 # Create new context
                 context = await browser.new_context(
@@ -203,6 +216,18 @@ class AsyncBrowserContextManager:
         except Exception as e:
             logger.warning(f"Error closing Crawl4AI crawler {oldest_id}: {e}")
     
+    async def _restart_browser(self, crawler_id: str):
+        """Restart browser for specific crawler"""
+        if crawler_id in self._browsers:
+            try:
+                await self._browsers[crawler_id].close()
+                del self._browsers[crawler_id]
+                if crawler_id in self._active_contexts:
+                    del self._active_contexts[crawler_id]
+                logger.info(f"Restarted browser for {crawler_id}")
+            except Exception as e:
+                logger.warning(f"Error restarting browser for {crawler_id}: {e}")
+
     async def cleanup_crawler(self, crawler_id: str):
         """Cleanup all resources for specific crawler"""
         async with self._lock:
@@ -212,6 +237,8 @@ class AsyncBrowserContextManager:
                     await self._browsers[crawler_id].close()
                     del self._browsers[crawler_id]
                     del self._active_contexts[crawler_id]
+                    if crawler_id in self._request_counts:
+                        del self._request_counts[crawler_id]
                     logger.info(f"Closed browser for {crawler_id}")
                 except Exception as e:
                     logger.warning(f"Error closing browser for {crawler_id}: {e}")
