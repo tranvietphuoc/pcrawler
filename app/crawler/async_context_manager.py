@@ -17,7 +17,6 @@ class AsyncBrowserContextManager:
     memory monitoring, and enhanced error recovery.
     """
     _instance = None
-    _lock = asyncio.Lock()
     
     def __new__(cls):
         if cls._instance is None:
@@ -36,6 +35,9 @@ class AsyncBrowserContextManager:
             container_name = os.getenv('HOSTNAME', 'default')
             self._worker_id = f"worker_{container_name}"
             self._process_id = os.getpid()
+            
+            # Create worker-specific lock (not singleton)
+            self._lock = asyncio.Lock()
             
             # Enhanced resource limits with process isolation
             self._max_contexts_per_worker = 2  # Further reduced for better isolation
