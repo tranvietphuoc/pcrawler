@@ -65,16 +65,16 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
 
 async def _fetch_links_with_retry_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """Async helper for link fetching with retry logic"""
-    # Adaptive retries/timeouts per pass
+    # Adaptive retries/timeouts per pass - giảm để tránh Celery worker timeout
     if pass_no == 1:
-        retries, timeout_s, delay_s = 4, 240, 3
+        retries, timeout_s, delay_s = 3, 120, 3  # Giảm từ 240s xuống 120s
     else:
-        retries, timeout_s, delay_s = 4, 360, 5
+        retries, timeout_s, delay_s = 3, 180, 5  # Giảm từ 360s xuống 180s
     
     for attempt in range(retries + 1):
         try:
-            # Progressive timeout: tăng timeout mỗi attempt
-            current_timeout = timeout_s + (attempt * 60)
+            # Progressive timeout: tăng timeout mỗi attempt - giảm để tránh timeout quá cao
+            current_timeout = timeout_s + (attempt * 30)  # Giảm từ 60s xuống 30s
             logger.info(f"[{industry_name}] Attempt {attempt+1}/{retries+1} (pass {pass_no}) with timeout={current_timeout}s")
             
             links = await asyncio.wait_for(

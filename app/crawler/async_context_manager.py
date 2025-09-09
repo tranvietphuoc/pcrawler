@@ -20,12 +20,22 @@ class AsyncBrowserContextManager:
         self._max_browsers = max_browsers
         self._max_contexts_per_browser = max_contexts_per_browser
         self._lock = asyncio.Lock()
-        self._context_lifetime = 90  # seconds - cân bằng cho 50% tài nguyên
-        self._browser_restart_threshold = 75  # restart browser sau 75 requests
+        self._context_lifetime = 300  # seconds - tăng lên 5 phút để contexts sống lâu hơn
+        self._browser_restart_threshold = 200  # restart browser sau 200 requests - tăng để ít restart hơn
     
+    async def _is_context_healthy(self, context) -> bool:
+        """Check if context is still healthy and usable"""
+        try:
+            # Try to create a test page to check if context is alive
+            test_page = await context.new_page()
+            await test_page.close()
+            return True
+        except Exception:
+            return False
+
     @asynccontextmanager
     async def get_playwright_context(self, crawler_id: str, user_agent: str, viewport: dict):
-        """Async context manager for Playwright context with automatic cleanup"""
+        """Async context manager for Playwright context with automatic cleanup and health check"""
         context = None
         page = None
         
@@ -60,6 +70,23 @@ class AsyncBrowserContextManager:
                 
                 # Track active context
                 self._active_contexts[crawler_id] = self._active_contexts.get(crawler_id, 0) + 1
+                
+                # Health check before creating page
+                if not await self._is_context_healthy(context):
+                    logger.warning(f"Context for {crawler_id} is not healthy, recreating...")
+                    await context.close()
+                    # Recreate context
+                    context = await browser.new_context(
+                        user_agent=user_agent,
+                        viewport=viewport,
+                        extra_http_headers={
+                            'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                            'Connection': 'keep-alive',
+                            'Upgrade-Insecure-Requests': '1',
+                        }
+                    )
                 
                 # Create page
                 page = await context.new_page()
@@ -136,6 +163,41 @@ class AsyncBrowserContextManager:
                     "--no-first-run",
                     "--disable-web-security",
                     "--disable-features=VizDisplayCompositor",
+                    "--disable-hang-monitor",
+                    "--disable-prompt-on-repost",
+                    "--disable-client-side-phishing-detection",
+                    "--disable-component-extensions-with-background-pages",
+                    "--disable-background-mode",
+                    "--disable-plugins-discovery",
+                    "--disable-preconnect",
+                    "--disable-print-preview",
+                    "--disable-speech-api",
+                    "--disable-file-system",
+                    "--disable-permissions-api",
+                    "--disable-presentation-api",
+                    "--disable-remote-fonts",
+                    "--disable-shared-workers",
+                    "--disable-webgl",
+                    "--disable-webgl2",
+                    "--disable-xss-auditor",
+                    "--no-zygote",
+                    "--single-process",
+                    "--disable-logging",
+                    "--disable-gpu-logging",
+                    "--silent",
+                    "--log-level=3",
+                    "--disable-crash-reporter",
+                    "--disable-in-process-stack-traces",
+                    "--disable-dev-tools",
+                    "--disable-breakpad",
+                    "--disable-component-update",
+                    "--disable-domain-reliability",
+                    "--force-color-profile=srgb",
+                    "--metrics-recording-only",
+                    "--no-report-upload",
+                    "--use-mock-keychain",
+                    "--disable-blink-features=AutomationControlled",
+                    "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 ]
             )
             self._browsers[crawler_id] = browser
@@ -178,6 +240,41 @@ class AsyncBrowserContextManager:
                     "--no-first-run",
                     "--disable-web-security",
                     "--disable-features=VizDisplayCompositor",
+                    "--disable-hang-monitor",
+                    "--disable-prompt-on-repost",
+                    "--disable-client-side-phishing-detection",
+                    "--disable-component-extensions-with-background-pages",
+                    "--disable-background-mode",
+                    "--disable-plugins-discovery",
+                    "--disable-preconnect",
+                    "--disable-print-preview",
+                    "--disable-speech-api",
+                    "--disable-file-system",
+                    "--disable-permissions-api",
+                    "--disable-presentation-api",
+                    "--disable-remote-fonts",
+                    "--disable-shared-workers",
+                    "--disable-webgl",
+                    "--disable-webgl2",
+                    "--disable-xss-auditor",
+                    "--no-zygote",
+                    "--single-process",
+                    "--disable-logging",
+                    "--disable-gpu-logging",
+                    "--silent",
+                    "--log-level=3",
+                    "--disable-crash-reporter",
+                    "--disable-in-process-stack-traces",
+                    "--disable-dev-tools",
+                    "--disable-breakpad",
+                    "--disable-component-update",
+                    "--disable-domain-reliability",
+                    "--force-color-profile=srgb",
+                    "--metrics-recording-only",
+                    "--no-report-upload",
+                    "--use-mock-keychain",
+                    "--disable-blink-features=AutomationControlled",
+                    "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 ]
             )
             self._crawl4ai_crawlers[crawler_id] = crawler

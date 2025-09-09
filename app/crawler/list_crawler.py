@@ -84,12 +84,12 @@ class ListCrawler(BaseCrawler):
 
     async def _scroll_and_load_industries(self, page, max_scroll_attempts: int = None) -> int:
         """Scroll và load industries - đơn giản, đảm bảo load đủ 88"""
-        # Tăng số lần scroll để đảm bảo load đủ
-        max_scroll_attempts = 150  # Tăng từ 80 lên 150
+        # Giảm số lần scroll để tăng tốc độ
+        max_scroll_attempts = 100  # Giảm từ 150 xuống 100
         
         prev_count = 0
         stable_count = 0
-        max_stable = 5  # Tăng từ 3 lên 5 - cần ổn định hơn
+        max_stable = 3  # Giảm từ 5 xuống 3 để tăng tốc độ
         
         for attempt in range(max_scroll_attempts):
             try:

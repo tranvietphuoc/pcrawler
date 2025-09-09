@@ -45,8 +45,8 @@ processing:
   max_concurrent_pages: 5
   max_retries: 3
   delay_range: [1, 3]
-  timeout: 120000
-  network_timeout: 120000
+  timeout: 60000  # Giảm từ 120s xuống 60s
+  network_timeout: 60000  # Giảm từ 120s xuống 60s
 
 output:
   output_dir: "data/tasks"
