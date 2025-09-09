@@ -3,7 +3,6 @@ import pandas as pd
 import gc
 import psutil
 import time
-from celery import Celery
 from app.crawler.contact_crawler import ContactCrawler
 from app.crawler.detail_crawler import DetailCrawler
 from app.crawler.list_crawler import ListCrawler

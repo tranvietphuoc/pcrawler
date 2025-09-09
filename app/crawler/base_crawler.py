@@ -2,7 +2,6 @@ import asyncio
 import random
 import logging
 from typing import List, Dict, Any
-from crawl4ai import AsyncWebCrawler
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
 from .async_context_manager import context_manager

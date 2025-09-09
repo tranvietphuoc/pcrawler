@@ -19,18 +19,21 @@ celery_app.conf.task_default_queue = "crawl"
 celery_app.conf.task_queues = (Queue("crawl"),)
 celery_app.conf.worker_prefetch_multiplier = 1
 celery_app.conf.task_routes = {
-    # Phase 1
-    "html.crawl_detail_pages": {"queue": "crawl"},
-    # Phase 2
+    # Phase 0: Link fetching
+    "links.fetch_industry_links": {"queue": "crawl"},
+    # Phase 1: Detail crawling
+    "detail.crawl_and_store": {"queue": "crawl"},
+    # Phase 2: Detail extraction
     "detail.extract_from_html": {"queue": "crawl"},
-    # Phase 3
+    # Phase 3: Contact crawling
     "contact.crawl_from_details": {"queue": "crawl"},
-    # Phase 4
+    # Phase 4: Email extraction
     "email.extract_from_contact": {"queue": "crawl"},
-    # Phase 5
-    "final.export": {"queue": "crawl"},
-    # Stats
+    # Phase 5: Database operations
+    "db.create_final_results": {"queue": "crawl"},
     "db.get_stats": {"queue": "crawl"},
+    # Phase 6: Export
+    "final.export": {"queue": "crawl"},
 }
 
 # Celery sẽ tự quản lý event loop với asyncio support
