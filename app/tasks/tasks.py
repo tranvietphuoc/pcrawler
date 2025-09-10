@@ -199,9 +199,9 @@ async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id:
     """Optimized async helper for link fetching with smart retry logic"""
     # Adaptive retries/timeouts per pass - tối ưu cho large industries
     if pass_no == 1:
-        retries, timeout_s, delay_s = 4, 600, 5  # Tăng timeout lên 10 phút, 4 retries
+        retries, timeout_s, delay_s = 3, 300, 3  # Giảm timeout xuống 5 phút, 3 retries
     else:
-        retries, timeout_s, delay_s = 5, 900, 10  # Tăng timeout lên 15 phút cho pass 2+
+        retries, timeout_s, delay_s = 4, 600, 5  # Tăng timeout lên 10 phút cho pass 2+
     
     for attempt in range(retries + 1):
         try:
@@ -216,6 +216,11 @@ async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id:
             
             if links:
                 logger.info(f"[{industry_name}] Success (pass {pass_no}) -> {len(links)} links")
+                
+                # Early termination for very large industries to prevent timeout
+                if len(links) > 2000:
+                    logger.warning(f"[{industry_name}] Very large industry ({len(links)} links) - consider splitting")
+                
                 return links
                 
         except asyncio.TimeoutError:

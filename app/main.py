@@ -47,7 +47,7 @@ async def run(config_name: str = "default", base_url: str = None):
     
     for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
         try:
-            result = task.get(timeout=1200)  # 20 minutes timeout per industry
+            result = task.get(timeout=900)  # 15 minutes timeout per industry
             logger.info(f"[{idx}/{len(link_tasks)}] Industry '{ind_name}' -> Task result: {result}")
             
             # Check if task was successful
@@ -90,6 +90,37 @@ async def run(config_name: str = "default", base_url: str = None):
             failed_industries.append((ind_id, ind_name))
     
     logger.info(f"Total links processed: {total_links_processed} companies across {len(industries)} industries")
+    
+    # Retry failed industries with longer timeout
+    if failed_industries:
+        logger.info(f"Retrying {len(failed_industries)} failed industries with extended timeout...")
+        for ind_id, ind_name in failed_industries:
+            try:
+                logger.info(f"Retrying industry '{ind_name}' with 60-minute timeout...")
+                retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 2)
+                result = retry_task.get(timeout=3600)  # 60 minutes timeout
+                
+                if result and result.get('checkpoint_file'):
+                    checkpoint_file = result.get('checkpoint_file')
+                    with open(checkpoint_file, 'r') as f:
+                        links = json.load(f)
+                    total_links = len(links)
+                    logger.info(f"Retry successful: '{ind_name}' -> {total_links} links")
+                    
+                    # Submit detail tasks
+                    for i in range(0, len(links), batch_size):
+                        batch = links[i:i+batch_size]
+                        task = task_crawl_detail_pages.delay(batch, batch_size)
+                        detail_tasks.append(task)
+                    
+                    total_links_processed += total_links
+                    industry_link_counts[ind_name] = total_links
+                    del links
+                else:
+                    logger.error(f"Retry failed for industry '{ind_name}'")
+                    
+            except Exception as e:
+                logger.error(f"Retry failed for industry '{ind_name}': {e}")
     
     # PHASE 2: Wait for all detail crawling tasks to complete
     if detail_tasks:
