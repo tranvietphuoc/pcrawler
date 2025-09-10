@@ -37,13 +37,20 @@ def _get_or_create_loop():
     
     with _loop_lock:
         if thread_id not in _loop_pool:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            try:
+                # Try to get existing loop first
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            except RuntimeError:
+                # No event loop exists, create new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             _loop_pool[thread_id] = loop
         return _loop_pool[thread_id]
 
-@celery_app.task(name="links.fetch_industry_links", bind=True, 
-                 autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 5})
+@celery_app.task(name="links.fetch_industry_links", bind=True)
 def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """
     Fetch company links for a single industry (optimized with browser reuse and event loop pooling)
@@ -157,8 +164,13 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             'error_type': str(type(e).__name__),
             'error_message': str(e)[:500]  # Truncate long messages for JSON
         })
-        # Re-raise with simple Exception for JSON serialization
-        raise Exception(f"Industry '{industry_name}' failed: {str(e)[:500]}")
+        # Don't re-raise to avoid serialization issues, just return error result
+        return {
+            'industry': industry_name,
+            'links_count': 0,
+            'checkpoint_file': None,
+            'error': str(e)[:500]
+        }
 
 async def _fetch_links_with_circuit_breaker_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """Async helper with circuit breaker and health monitoring integration"""
