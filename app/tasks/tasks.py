@@ -50,6 +50,24 @@ def _get_or_create_loop():
             _loop_pool[thread_id] = loop
         return _loop_pool[thread_id]
 
+def _run_with_fresh_loop(coro, original_loop=None):
+    """Run async coroutine with fresh event loop to avoid conflicts"""
+    import asyncio
+    
+    # Create fresh loop
+    new_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(new_loop)
+    
+    try:
+        # Run coroutine in fresh loop
+        result = new_loop.run_until_complete(coro)
+        return result
+    finally:
+        # Cleanup and restore original loop
+        new_loop.close()
+        if original_loop:
+            asyncio.set_event_loop(original_loop)
+
 @celery_app.task(name="links.fetch_industry_links", bind=True)
 def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """
@@ -67,23 +85,10 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
         
         try:
             # Fetch links với optimized retry logic
-            # Ensure loop is not already running
-            if loop.is_running():
-                # Create new loop if current one is running
-                import asyncio
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    links = new_loop.run_until_complete(
-                        _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no)
-                    )
-                finally:
-                    new_loop.close()
-                    asyncio.set_event_loop(loop)
-            else:
-                links = loop.run_until_complete(
-                    _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no)
-                )
+            links = _run_with_fresh_loop(
+                _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no),
+                original_loop=loop
+            )
             
             # Chuẩn hoá dữ liệu
             normalized = []
@@ -154,17 +159,18 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                     # Wait for cancellation to complete (with timeout)
                     if pending_tasks:
                         try:
-                            loop.run_until_complete(
+                            _run_with_fresh_loop(
                                 asyncio.wait_for(
                                     asyncio.gather(*pending_tasks, return_exceptions=True),
                                     timeout=5.0  # 5 second timeout
-                                )
+                                ),
+                                original_loop=loop
                             )
                         except asyncio.TimeoutError:
                             logger.warning("Task cancellation timeout")
                 
                 # Cleanup crawler resources
-                loop.run_until_complete(list_crawler.cleanup())
+                _run_with_fresh_loop(list_crawler.cleanup(), original_loop=loop)
                 
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
@@ -380,8 +386,9 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
         
         try:
             # Use circuit breaker and health monitoring for detail crawling
-            result = loop.run_until_complete(
-                _crawl_detail_pages_with_circuit_breaker_async(detail_crawler, companies, batch_size)
+            result = _run_with_fresh_loop(
+                _crawl_detail_pages_with_circuit_breaker_async(detail_crawler, companies, batch_size),
+                original_loop=loop
             )
             return result
             
@@ -399,17 +406,18 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
                     # Wait for cancellation to complete (with timeout)
                     if pending_tasks:
                         try:
-                            loop.run_until_complete(
+                            _run_with_fresh_loop(
                                 asyncio.wait_for(
                                     asyncio.gather(*pending_tasks, return_exceptions=True),
                                     timeout=5.0  # 5 second timeout
-                                )
+                                ),
+                                original_loop=loop
                             )
                         except asyncio.TimeoutError:
                             logger.warning("Task cancellation timeout")
                 
                 # Cleanup crawler resources
-                loop.run_until_complete(detail_crawler.cleanup())
+                _run_with_fresh_loop(detail_crawler.cleanup(), original_loop=loop)
                 
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
@@ -437,7 +445,10 @@ def check_worker_health(self):
         
         try:
             health_summary = health_monitor.get_health_summary()
-            circuit_states = loop.run_until_complete(circuit_manager.get_all_states())
+            circuit_states = _run_with_fresh_loop(
+                circuit_manager.get_all_states(),
+                original_loop=loop
+            )
             
             logger.info(f"Health check completed: {health_summary}")
             
@@ -501,7 +512,10 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     memory_before = psutil.Process().memory_info().rss / 1024 / 1024  # MB
                     
                     # Crawl contact pages batch
-                    batch_results = loop.run_until_complete(contact_crawler.crawl_batch_from_details(batch))
+                    batch_results = _run_with_fresh_loop(
+                        contact_crawler.crawl_batch_from_details(batch),
+                        original_loop=loop
+                    )
                     
                     processed += batch_results['total']
                     successful += batch_results['successful']
@@ -530,7 +544,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     # Memory threshold check
                     if memory_after_gc > 1000:  # 1GB threshold
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
-                        loop.run_until_complete(contact_crawler.cleanup())
+                        _run_with_fresh_loop(contact_crawler.cleanup(), original_loop=loop)
                         time.sleep(2)
                         # Browser will be created automatically by context manager
                     
@@ -541,7 +555,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     
                     # Force cleanup on error
                     try:
-                        loop.run_until_complete(contact_crawler.cleanup())
+                        _run_with_fresh_loop(contact_crawler.cleanup(), original_loop=loop)
                         time.sleep(1)
                         # Browser will be created automatically by context manager
                     except:
@@ -551,7 +565,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     continue
             
             # Cleanup
-            loop.run_until_complete(contact_crawler.cleanup())
+            _run_with_fresh_loop(contact_crawler.cleanup(), original_loop=loop)
             
             return {
                 'status': 'completed',
@@ -574,10 +588,13 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     
                     # Wait for cancellation to complete
                     if pending_tasks:
-                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                        _run_with_fresh_loop(
+                            asyncio.gather(*pending_tasks, return_exceptions=True),
+                            original_loop=loop
+                        )
                 
                 # Cleanup crawler resources
-                loop.run_until_complete(contact_crawler.cleanup())
+                _run_with_fresh_loop(contact_crawler.cleanup(), original_loop=loop)
                 
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
@@ -699,7 +716,7 @@ def get_database_stats():
         
         email_extractor = EmailExtractor()
         summary = email_extractor.get_extraction_summary()
-        
+    
         return {
             'status': 'completed',
             'database_stats': stats,
