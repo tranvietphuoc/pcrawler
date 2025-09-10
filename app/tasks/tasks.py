@@ -155,10 +155,10 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
         self.update_state(state='FAILURE', meta={
             'industry': industry_name, 
             'error_type': str(type(e).__name__),
-            'error_message': str(e)
+            'error_message': str(e)[:500]  # Truncate long messages for JSON
         })
-        # Re-raise with proper exception type for Celery serialization
-        raise type(e)(f"Industry '{industry_name}' failed: {str(e)}")
+        # Re-raise with simple Exception for JSON serialization
+        raise Exception(f"Industry '{industry_name}' failed: {str(e)[:500]}")
 
 async def _fetch_links_with_circuit_breaker_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """Async helper with circuit breaker and health monitoring integration"""

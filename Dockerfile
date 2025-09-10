@@ -10,10 +10,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates fonts-liberation libu2f-udev libvulkan1 wget gnupg \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for security
+RUN groupadd -r crawler && useradd -r -g crawler crawler
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && python -m playwright install chromium && python -m playwright install-deps chromium
 COPY . .
+
+# Change ownership to non-root user
+RUN chown -R crawler:crawler /app
+
+# Switch to non-root user
+USER crawler
+
 ENV PYTHONUNBUFFERED=1 TZ=Asia/Ho_Chi_Minh \
     PYTHONPATH=/app \
     CELERY_BROKER_URL=redis://redis:6379/0 \
