@@ -1,6 +1,7 @@
 import asyncio, argparse, logging
 import os
 import uuid
+import json
 import pandas as pd
 from typing import List, Dict, Any
 from app.crawler.list_crawler import ListCrawler
@@ -175,8 +176,6 @@ async def run(
             
             # Load links from checkpoint
             try:
-                import json
-                import os
                 # Tạo thư mục data nếu chưa tồn tại
                 os.makedirs('/app/data', exist_ok=True)
                 with open(checkpoint_file, 'r') as f:
