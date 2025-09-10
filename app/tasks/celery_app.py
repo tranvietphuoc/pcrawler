@@ -18,6 +18,10 @@ celery_app.conf.include = ["app.tasks.tasks"]
 celery_app.conf.task_default_queue = "crawl"
 celery_app.conf.task_queues = (Queue("crawl"),)
 celery_app.conf.worker_prefetch_multiplier = 1
+celery_app.conf.task_acks_late = True  # Only ack after task completion
+celery_app.conf.worker_disable_rate_limits = True  # Disable rate limits
+celery_app.conf.task_reject_on_worker_lost = True  # Reject tasks if worker lost
+celery_app.conf.task_acks_on_failure_or_timeout = True  # Ack failed/timeout tasks
 
 # (3) RESULT BACKEND CONFIGURATION - FIX STUCK TASKS
 celery_app.conf.result_expires = 3600  # Results expire after 1 hour

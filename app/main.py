@@ -57,7 +57,7 @@ async def run(config_name: str = "default", base_url: str = None):
         
         for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
             try:
-                result = task.get(timeout=900)  # 15 minutes timeout per industry
+                result = task.get(timeout=600)  # 10 minutes timeout per industry
                 logger.info(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Task result: {result}")
                 
                 # Check if task was successful

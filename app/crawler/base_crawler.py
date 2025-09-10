@@ -4,7 +4,7 @@ import logging
 from typing import List, Dict, Any
 from playwright.async_api import async_playwright
 from config import CrawlerConfig
-from .async_context_manager import context_manager
+from .async_context_manager import get_context_manager
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,8 @@ class BaseCrawler:
     def __init__(self, config: CrawlerConfig = None):
         self.config = config or CrawlerConfig()
         
-        # Async context manager
-        self.context_manager = context_manager
+        # Async context manager - NEW INSTANCE for isolation
+        self.context_manager = get_context_manager()
         self.crawler_id = f"{self.__class__.__name__}_{id(self)}"
         
         # Request tracking

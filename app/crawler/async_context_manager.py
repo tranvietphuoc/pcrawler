@@ -28,23 +28,43 @@ class AsyncBrowserContextManager:
         
         # Auto-generate worker_id from container name or environment
         container_name = os.getenv('HOSTNAME', 'default')
-        self._worker_id = f"worker_{container_name}"
-        self._process_id = os.getpid()
+        process_id = os.getpid()
+        thread_id = id(asyncio.current_task()) if asyncio.current_task() else 0
+        # Add unique timestamp and random component for better isolation
+        import uuid
+        unique_id = str(uuid.uuid4())[:8]
+        self._worker_id = f"worker_{container_name}_{process_id}_{thread_id}_{unique_id}"
+        self._process_id = process_id
         
         # Create worker-specific lock (not singleton)
         self._lock = asyncio.Lock()
         
-        # Enhanced resource limits with process isolation - OPTIMIZED
-        self._max_contexts_per_worker = 4  # Tăng từ 2 lên 4 cho better concurrency
-        self._browser_restart_threshold = 75  # Tăng từ 50 lên 75 để giảm restart frequency
-        self._context_lifetime = 240  # Tăng từ 180 lên 240s để tái sử dụng context lâu hơn
-        self._memory_threshold_mb = 600  # Tăng từ 400 lên 600MB per browser
-        self._max_memory_per_worker_mb = 1200  # Tăng từ 800 lên 1200MB per worker
+        # Enhanced resource limits with process isolation - SCALING OPTIMIZED
+        self._max_contexts_per_worker = 3  # Giảm xuống 3 cho scaling stability
+        self._browser_restart_threshold = 150  # Giảm xuống 150 cho scaling
+        self._context_lifetime = 480  # Giảm xuống 480s (8 phút) cho scaling
+        self._memory_threshold_mb = 500  # Giảm xuống 500MB per browser cho scaling
+        self._max_memory_per_worker_mb = 1000  # Giảm xuống 1000MB per worker cho scaling
+        
+        # Browser persistence settings
+        self._browser_persistence_enabled = True  # Enable browser persistence
+        self._browser_keepalive_interval = 30  # Keep-alive check every 30 seconds
+        self._browser_keepalive_timeout = 10  # Keep-alive timeout 10 seconds
+        self._browser_auto_reconnect = True  # Auto-reconnect on failure
         
         # Process isolation settings
         self._worker_browser_pool = {}  # Separate browser pool per worker
         self._worker_memory_tracker = {}  # Memory tracking per worker
         self._restart_suspended: Dict[str, bool] = {}  # Suspend restarts per worker
+        
+        # Browser persistence tracking
+        self._browser_last_activity = {}  # Track last activity time
+        self._browser_keepalive_tasks = {}  # Keep-alive background tasks
+        self._browser_connection_status = {}  # Track connection status
+        
+        # Task isolation tracking
+        self._active_tasks = set()  # Track active tasks
+        self._task_browser_mapping = {}  # Map tasks to browsers
         
         # Cache for performance
         self._process = psutil.Process()
@@ -105,9 +125,47 @@ class AsyncBrowserContextManager:
         except Exception as e:
             logger.warning(f"Garbage collection failed: {e}")
     
-    async def _get_or_create_browser(self, crawler_id: str):
+    async def _browser_keepalive(self, worker_key: str):
+        """Keep browser alive with periodic health checks"""
+        while worker_key in self._worker_browser_pool:
+            try:
+                await asyncio.sleep(self._browser_keepalive_interval)
+                
+                if worker_key not in self._worker_browser_pool:
+                    break
+                
+                browser = self._worker_browser_pool[worker_key]
+                
+                # Quick health check
+                try:
+                    if hasattr(browser, "is_connected"):
+                        if not browser.is_connected():
+                            logger.warning(f"Browser {worker_key} disconnected during keepalive, reconnecting...")
+                            await self._restart_browser(worker_key)
+                            continue
+                    
+                    # Update last activity
+                    self._browser_last_activity[worker_key] = time.time()
+                    self._browser_connection_status[worker_key] = "connected"
+                    
+                except Exception as e:
+                    logger.warning(f"Browser {worker_key} keepalive check failed: {e}")
+                    if self._browser_auto_reconnect:
+                        await self._restart_browser(worker_key)
+                    else:
+                        self._browser_connection_status[worker_key] = "disconnected"
+                        
+            except Exception as e:
+                logger.error(f"Browser keepalive error for {worker_key}: {e}")
+                await asyncio.sleep(5)  # Wait before retry
+    
+    async def _get_or_create_browser(self, crawler_id: str, task_id: str = None):
         """Get or create browser with process isolation and memory monitoring"""
-        worker_key = f"{self._worker_id}_{crawler_id}"
+        # Include task_id for better isolation
+        if task_id:
+            worker_key = f"{self._worker_id}_{crawler_id}_{task_id}"
+        else:
+            worker_key = f"{self._worker_id}_{crawler_id}"
         
         # Check if we need to restart due to memory pressure (skip if suspended)
         if not self._restart_suspended.get(self._worker_id, False) and await self._check_memory_pressure():
@@ -119,16 +177,16 @@ class AsyncBrowserContextManager:
         if worker_key in self._worker_browser_pool:
             browser = self._worker_browser_pool[worker_key]
             try:
-                # Enhanced health check: prefer is_connected() over version()
+                # Enhanced health check with timeout
                 if hasattr(browser, "is_connected"):
                     if not browser.is_connected():
                         raise Exception("Browser disconnected")
                 else:
-                    # Fallback: try to access version safely (method or property)
+                    # Fallback: try to access version safely with timeout
                     ver = None
                     try:
-                        ver = await browser.version()  # if async method
-                    except TypeError:
+                        ver = await asyncio.wait_for(browser.version(), timeout=5.0)  # 5s timeout
+                    except (TypeError, asyncio.TimeoutError):
                         try:
                             ver = browser.version  # property access
                         except Exception:
@@ -154,6 +212,15 @@ class AsyncBrowserContextManager:
         # Create new browser
         browser = await self._create_new_browser(worker_key)
         self._worker_browser_pool[worker_key] = browser
+        
+        # Start keep-alive task for browser persistence
+        if self._browser_persistence_enabled:
+            self._browser_last_activity[worker_key] = time.time()
+            self._browser_connection_status[worker_key] = "connected"
+            keepalive_task = asyncio.create_task(self._browser_keepalive(worker_key))
+            self._browser_keepalive_tasks[worker_key] = keepalive_task
+            logger.info(f"Started keep-alive for browser {worker_key}")
+        
         return browser
     
     async def _create_new_browser(self, worker_key: str):
@@ -204,7 +271,7 @@ class AsyncBrowserContextManager:
                     "--disable-xss-auditor", "--disable-breakpad",
                     
                     # Process isolation
-                    f"--remote-debugging-port={9000 + hash(worker_key) % 1000}"
+                    f"--remote-debugging-port={9000 + hash(worker_key) % 5000}"
                 ]
             )
             
@@ -222,6 +289,16 @@ class AsyncBrowserContextManager:
     async def _restart_browser(self, worker_key: str):
         """Restart browser with proper cleanup"""
         try:
+            # Stop keep-alive task
+            if worker_key in self._browser_keepalive_tasks:
+                keepalive_task = self._browser_keepalive_tasks[worker_key]
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except asyncio.CancelledError:
+                    pass
+                del self._browser_keepalive_tasks[worker_key]
+            
             if worker_key in self._worker_browser_pool:
                 browser = self._worker_browser_pool[worker_key]
                 await browser.close()
@@ -232,6 +309,13 @@ class AsyncBrowserContextManager:
             
             if worker_key in self._last_restart:
                 del self._last_restart[worker_key]
+            
+            # Clean up persistence tracking
+            if worker_key in self._browser_last_activity:
+                del self._browser_last_activity[worker_key]
+            
+            if worker_key in self._browser_connection_status:
+                del self._browser_connection_status[worker_key]
             
             # Force garbage collection
             await self._force_garbage_collection()
@@ -264,8 +348,35 @@ class AsyncBrowserContextManager:
         self._restart_suspended[self._worker_id] = False
         logger.info(f"Browser restarts resumed for worker {self._worker_id}")
     
+    async def get_browser_status(self, crawler_id: str = None):
+        """Get browser status information"""
+        worker_key = f"{self._worker_id}_{crawler_id}" if crawler_id else None
+        
+        status = {
+            "worker_id": self._worker_id,
+            "browser_persistence_enabled": self._browser_persistence_enabled,
+            "total_browsers": len(self._worker_browser_pool),
+            "restart_suspended": self._restart_suspended.get(self._worker_id, False),
+            "browsers": {}
+        }
+        
+        for key, browser in self._worker_browser_pool.items():
+            if worker_key and key != worker_key:
+                continue
+                
+            browser_status = {
+                "connected": browser.is_connected() if hasattr(browser, "is_connected") else "unknown",
+                "last_activity": self._browser_last_activity.get(key, 0),
+                "connection_status": self._browser_connection_status.get(key, "unknown"),
+                "memory_usage_mb": self._memory_usage.get(key, 0),
+                "has_keepalive": key in self._browser_keepalive_tasks
+            }
+            status["browsers"][key] = browser_status
+        
+        return status
+    
     @asynccontextmanager
-    async def get_playwright_context(self, crawler_id: str, user_agent: str, viewport: dict):
+    async def get_playwright_context(self, crawler_id: str, user_agent: str, viewport: dict, task_id: str = None):
         """Enhanced playwright context with process isolation and memory monitoring"""
         context = None
         page = None
@@ -278,10 +389,13 @@ class AsyncBrowserContextManager:
                     await self._restart_all_worker_browsers()
                 
                 # Get browser with process isolation
-                browser = await self._get_or_create_browser(crawler_id)
+                browser = await self._get_or_create_browser(crawler_id, task_id)
                 
                 # Check if we need to restart browser based on request count
-                worker_key = f"{self._worker_id}_{crawler_id}"
+                if task_id:
+                    worker_key = f"{self._worker_id}_{crawler_id}_{task_id}"
+                else:
+                    worker_key = f"{self._worker_id}_{crawler_id}"
                 if worker_key in self._request_counts:
                     self._request_counts[worker_key] += 1
                     if (not self._restart_suspended.get(self._worker_id, False)) and (self._request_counts[worker_key] > self._browser_restart_threshold):
@@ -504,7 +618,7 @@ class AsyncBrowserContextManager:
                     "--no-report-upload", "--use-mock-keychain", "--force-color-profile=srgb",
                     "--metrics-recording-only", "--no-zygote", "--disable-hang-monitor",
                     "--disable-prompt-on-repost", "--disable-xss-auditor", "--disable-breakpad",
-                    f"--remote-debugging-port={8000 + hash(worker_key) % 1000}"
+                    f"--remote-debugging-port={8000 + hash(worker_key) % 5000}"
                 ]
             )
             
@@ -543,4 +657,4 @@ def get_context_manager():
     return AsyncBrowserContextManager()
 
 # For backward compatibility, create instance
-context_manager = get_context_manager()
+# context_manager = get_context_manager()
