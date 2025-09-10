@@ -5,8 +5,5 @@
 __pycache__
 .venv
 *.db
-tools
 *.xlsx
-normailize_email.py
-phone.py
 *.json

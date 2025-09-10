@@ -60,37 +60,6 @@ async def run(
     # PHASE 1: Crawl detail pages -> DB
     detail_tasks = []
     total_companies = 0
-    all_company_links: List[Dict[str, Any]] = []
-    
-    # Load existing checkpoints
-    import json
-    import re
-    checkpoint_dir = "/tmp"
-    if os.path.exists(checkpoint_dir):
-        for filename in os.listdir(checkpoint_dir):
-            if filename.startswith("checkpoint_") and filename.endswith(".json"):
-                try:
-                    with open(os.path.join(checkpoint_dir, filename), 'r') as f:
-                        checkpoint_data = json.load(f)
-                        if checkpoint_data:
-                            # Extract industry name from sanitized filename
-                            # Format: checkpoint_{sanitized_name}_{pass_no}.json
-                            parts = filename.replace("checkpoint_", "").replace(".json", "").split("_")
-                            if len(parts) >= 2:
-                                # Reconstruct original industry name (approximate)
-                                sanitized_name = "_".join(parts[:-1])  # All parts except last (pass_no)
-                                # This is approximate - we can't perfectly reconstruct the original name
-                                industry_name = sanitized_name.replace("_", " ")
-                            else:
-                                industry_name = filename
-                            
-                            all_company_links.extend(checkpoint_data)
-                            logger.info(f"Loaded checkpoint: {industry_name} -> {len(checkpoint_data)} links")
-                except Exception as e:
-                    logger.warning(f"Failed to load checkpoint {filename}: {e}")
-    
-    if all_company_links:
-        logger.info(f"Loaded {len(all_company_links)} links from checkpoints")
     async def fetch_links_with_retry(ind_id: str, ind_name: str, pass_no: int = 1) -> List[str]:
         # Adaptive retries/timeouts per pass (tăng để giảm miss ở industry lớn)
         if pass_no == 1:
@@ -159,6 +128,8 @@ async def run(
     
     # Collect results from parallel tasks
     logger.info(f"Waiting for {len(link_tasks)} industry link fetching tasks to complete...")
+    total_links_processed = 0
+    
     for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
         try:
             result = task.get(timeout=1200)  # 20 minutes timeout per industry
@@ -195,7 +166,7 @@ async def run(
                 logger.info(f"[{idx}/{len(industries)}] Retrying '{ind_name}' with extended timeout...")
                 retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
                 retry_result = retry_task.get(timeout=1200)
-                if retry_result and retry_result.get('status') == 'success':
+                if retry_result and retry_result.get('checkpoint_file'):
                     retry_checkpoint = retry_result.get('checkpoint_file')
                     if retry_checkpoint:
                         try:
@@ -208,19 +179,25 @@ async def run(
                             logger.warning(f"[{idx}/{len(industries)}] Failed to load retry checkpoint: {e}")
             
             logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
-            all_company_links.extend(links)
+            
+            # MEMORY OPTIMIZATION: Submit detail crawling tasks immediately instead of storing all links
+            logger.info(f"Submitting detail crawling tasks for industry '{ind_name}' ({len(links)} companies)...")
+            for i in range(0, len(links), batch_size):
+                batch = links[i:i+batch_size]
+                task = task_crawl_detail_pages.delay(batch, batch_size)
+                detail_tasks.append(task)
+            
+            total_links_processed += len(links)
             industry_link_counts[ind_name] = len(links)
+            
+            # Clear links from memory to save memory
+            del links
             
         except Exception as e:
             logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED: {e}")
             failed_industries.append((ind_id, ind_name))
     
-    # Submit detail crawling tasks for all collected links
-    logger.info(f"Submitting detail crawling tasks for {len(all_company_links)} companies...")
-    for i in range(0, len(all_company_links), batch_size):
-        batch = all_company_links[i:i+batch_size]
-        task = task_crawl_detail_pages.delay(batch, batch_size)
-        detail_tasks.append(task)
+    logger.info(f"Total links processed: {total_links_processed} companies across {len(industries)} industries")
 
     # PHASE 0 - PASS 2: Retry failed industries
     if failed_industries:
@@ -247,14 +224,19 @@ async def run(
                     item = {**item}
                     item['industry'] = ind_name
                     normalized.append(item)
-            all_company_links.extend(normalized)
-            industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
             
-            # Submit detail batches ngay cho pass 2
+            # MEMORY OPTIMIZATION: Submit detail batches immediately instead of storing in all_company_links
+            logger.info(f"[Retry] Submitting detail crawling tasks for industry '{ind_name}' ({len(normalized)} companies)...")
             for i in range(0, len(normalized), batch_size):
                 batch = normalized[i:i+batch_size]
                 t = task_crawl_detail_pages.delay(batch, batch_size)
                 detail_tasks.append(t)
+            
+            total_links_processed += len(normalized)
+            industry_link_counts[ind_name] = industry_link_counts.get(ind_name, 0) + len(normalized)
+            
+            # Clear normalized from memory to save memory
+            del normalized
             
             # Random uniform delay giữa các industry retry
             import random
@@ -342,7 +324,7 @@ async def run(
             logger.info("FINAL RESULT: All industries now have links!")
 
     # PHASE 1: Tổng kết và chờ tất cả detail batches (đã submit dần trong lúc fetch)
-    total_companies = len(all_company_links)
+    total_companies = total_links_processed
     logger.info(f"Total unique company links collected: {total_companies}")
     logger.info(f"Submitted {len(detail_tasks)} detail batches. Waiting for completion...")
 
