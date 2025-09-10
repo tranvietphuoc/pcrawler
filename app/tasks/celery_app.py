@@ -23,18 +23,18 @@ celery_app.conf.worker_disable_rate_limits = True  # Disable rate limits
 celery_app.conf.task_reject_on_worker_lost = True  # Reject tasks if worker lost
 celery_app.conf.task_acks_on_failure_or_timeout = True  # Ack failed/timeout tasks
 
-# (3) RESULT BACKEND CONFIGURATION - FIX EXCEPTION SERIALIZATION
-celery_app.conf.result_expires = 1800  # Results expire after 30 minutes
-celery_app.conf.result_persistent = False  # Disable persistence to avoid corruption
-celery_app.conf.task_ignore_result = False  # Don't ignore results
+# (3) RESULT BACKEND CONFIGURATION - DISABLE TO AVOID SERIALIZATION ISSUES
+celery_app.conf.result_expires = 300  # Results expire after 5 minutes
+celery_app.conf.result_persistent = False  # Disable persistence
+celery_app.conf.task_ignore_result = True  # Ignore results to avoid serialization issues
 celery_app.conf.task_store_eager_result = False  # Don't store eager results
-celery_app.conf.result_compression = None  # Disable compression to avoid issues
+celery_app.conf.result_compression = None  # Disable compression
 celery_app.conf.result_serializer = 'json'  # Use JSON for security
 celery_app.conf.accept_content = ['json']  # Only accept JSON
 celery_app.conf.task_serializer = 'json'  # Use JSON for task serialization
-celery_app.conf.result_backend_max_retries = 1  # Reduce retries
-celery_app.conf.result_backend_always_retry = False  # Don't always retry
-celery_app.conf.result_backend_retry_delay = 2  # Increase delay
+celery_app.conf.result_backend_max_retries = 0  # No retries
+celery_app.conf.result_backend_always_retry = False  # Don't retry
+celery_app.conf.result_backend_retry_delay = 1  # Minimal delay
 celery_app.conf.result_backend_retry_jitter = False  # Disable jitter
 celery_app.conf.task_routes = {
     # Phase 0: Link fetching

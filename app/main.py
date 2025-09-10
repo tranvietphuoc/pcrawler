@@ -57,17 +57,18 @@ async def run(config_name: str = "default", base_url: str = None):
         
         for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
             try:
-                result = task.get(timeout=600)  # 10 minutes timeout per industry
-                logger.info(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Task result: {result}")
+                # Wait for task completion without getting result (to avoid serialization issues)
+                task.get(timeout=600)  # 10 minutes timeout per industry
+                logger.info(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Task completed")
                 
-                # Check if task was successful
-                if not result or not result.get('checkpoint_file'):
+                # Check if checkpoint file exists (task success indicator)
+                checkpoint_file = f"/app/data/checkpoint_{ind_name.replace(' ', '_').replace('/', '_')}_1.json"
+                if not os.path.exists(checkpoint_file):
                     logger.error(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> FAILED; will retry later")
                     failed_industries.append((ind_id, ind_name))
                     continue
                 
                 # Load links from checkpoint file
-                checkpoint_file = result.get('checkpoint_file')
                 try:
                     with open(checkpoint_file, 'r') as f:
                         links = json.load(f)

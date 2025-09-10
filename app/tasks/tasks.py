@@ -67,9 +67,23 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
         
         try:
             # Fetch links với optimized retry logic
-            links = loop.run_until_complete(
-                _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no)
-            )
+            # Ensure loop is not already running
+            if loop.is_running():
+                # Create new loop if current one is running
+                import asyncio
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    links = new_loop.run_until_complete(
+                        _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no)
+                    )
+                finally:
+                    new_loop.close()
+                    asyncio.set_event_loop(loop)
+            else:
+                links = loop.run_until_complete(
+                    _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no)
+                )
             
             # Chuẩn hoá dữ liệu
             normalized = []
