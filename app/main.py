@@ -147,51 +147,64 @@ async def run(
                 failed_industries.append((ind_id, ind_name))
                 continue
             
-            # Load links from checkpoint
+            # Load links from checkpoint using BATCH LOAD (MEMORY OPTIMIZED)
             try:
                 # Tạo thư mục data nếu chưa tồn tại
                 os.makedirs('/app/data', exist_ok=True)
+                
+                # BATCH LOAD: Load từng batch thay vì load toàn bộ file
+                def load_links_in_batches(checkpoint_file, batch_size):
+                    with open(checkpoint_file, 'r') as f:
+                        links = json.load(f)
+                    for i in range(0, len(links), batch_size):
+                        batch = links[i:i+batch_size]
+                        yield batch
+                
+                # Count total links first (for logging)
                 with open(checkpoint_file, 'r') as f:
-                    links = json.load(f)
-                logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Loaded {len(links)} links from checkpoint")
+                    all_links = json.load(f)
+                total_links = len(all_links)
+                logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Loaded {total_links} links from checkpoint")
+                
+                # Check if we got reasonable number of links (industry size validation)
+                if total_links < 10:  # Industry quá nhỏ, có thể bị miss
+                    logger.warning(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Only {total_links} links (suspiciously low)")
+                    # Try one more time with longer timeout
+                    logger.info(f"[{idx}/{len(industries)}] Retrying '{ind_name}' with extended timeout...")
+                    retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
+                    retry_result = retry_task.get(timeout=1200)
+                    if retry_result and retry_result.get('checkpoint_file'):
+                        retry_checkpoint = retry_result.get('checkpoint_file')
+                        if retry_checkpoint:
+                            try:
+                                with open(retry_checkpoint, 'r') as f:
+                                    links_retry = json.load(f)
+                                if len(links_retry) > total_links:
+                                    checkpoint_file = retry_checkpoint
+                                    total_links = len(links_retry)
+                                    logger.info(f"[{idx}/{len(industries)}] Retry successful: {total_links} links")
+                            except Exception as e:
+                                logger.warning(f"[{idx}/{len(industries)}] Failed to load retry checkpoint: {e}")
+                
+                logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {total_links} companies")
+                
+                # BATCH LOAD: Submit detail crawling tasks in batches (MEMORY OPTIMIZED)
+                logger.info(f"Submitting detail crawling tasks for industry '{ind_name}' ({total_links} companies) in batches...")
+                batch_count = 0
+                for batch in load_links_in_batches(checkpoint_file, batch_size):
+                    batch_count += 1
+                    task = task_crawl_detail_pages.delay(batch, batch_size)
+                    detail_tasks.append(task)
+                    if batch_count % 10 == 0:  # Log progress every 10 batches
+                        logger.info(f"Submitted {batch_count} batches for industry '{ind_name}'...")
+                
+                total_links_processed += total_links
+                industry_link_counts[ind_name] = total_links
+                
             except Exception as e:
                 logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Failed to load checkpoint: {e}; will retry later")
                 failed_industries.append((ind_id, ind_name))
                 continue
-            
-            # Check if we got reasonable number of links (industry size validation)
-            if len(links) < 10:  # Industry quá nhỏ, có thể bị miss
-                logger.warning(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Only {len(links)} links (suspiciously low)")
-                # Try one more time with longer timeout
-                logger.info(f"[{idx}/{len(industries)}] Retrying '{ind_name}' with extended timeout...")
-                retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
-                retry_result = retry_task.get(timeout=1200)
-                if retry_result and retry_result.get('checkpoint_file'):
-                    retry_checkpoint = retry_result.get('checkpoint_file')
-                    if retry_checkpoint:
-                        try:
-                            with open(retry_checkpoint, 'r') as f:
-                                links_retry = json.load(f)
-                            if len(links_retry) > len(links):
-                                links = links_retry
-                                logger.info(f"[{idx}/{len(industries)}] Retry successful: {len(links)} links")
-                        except Exception as e:
-                            logger.warning(f"[{idx}/{len(industries)}] Failed to load retry checkpoint: {e}")
-            
-            logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
-            
-            # MEMORY OPTIMIZATION: Submit detail crawling tasks immediately instead of storing all links
-            logger.info(f"Submitting detail crawling tasks for industry '{ind_name}' ({len(links)} companies)...")
-            for i in range(0, len(links), batch_size):
-                batch = links[i:i+batch_size]
-                task = task_crawl_detail_pages.delay(batch, batch_size)
-                detail_tasks.append(task)
-            
-            total_links_processed += len(links)
-            industry_link_counts[ind_name] = len(links)
-            
-            # Clear links from memory to save memory
-            del links
             
         except Exception as e:
             logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED: {e}")
@@ -297,10 +310,8 @@ async def run(
                         item['industry'] = ind_name
                         normalized.append(item)
                 
-                all_company_links.extend(normalized)
-                industry_link_counts[ind_name] = len(normalized)
-                
-                # Submit detail batches với delay để tránh overload
+                # MEMORY OPTIMIZATION: Submit detail batches immediately instead of storing in all_company_links
+                logger.info(f"[Final Attempt] Submitting detail crawling tasks for industry '{ind_name}' ({len(normalized)} companies)...")
                 for i in range(0, len(normalized), batch_size):
                     batch = normalized[i:i+batch_size]
                     t = task_crawl_detail_pages.delay(batch, batch_size)
@@ -309,6 +320,12 @@ async def run(
                     if i % (batch_size * 5) == 0:  # Delay mỗi 5 batches
                         import random
                         await asyncio.sleep(random.uniform(1, 3))
+                
+                total_links_processed += len(normalized)
+                industry_link_counts[ind_name] = len(normalized)
+                
+                # Clear normalized from memory to save memory
+                del normalized
                 
                 # Random uniform delay for final attempt
                 import random
