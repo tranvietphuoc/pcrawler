@@ -22,7 +22,7 @@ services:
 
   worker:
     build: .
-    command: celery -A app.tasks.tasks worker --loglevel=info --hostname=worker@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
+    command: celery -A app.tasks.celery_app worker --loglevel=info --hostname=worker@%h --concurrency=3 --prefetch-multiplier=1 --max-memory-per-child=1500000 --max-tasks-per-child=20
     environment:
       - CELERY_WORKER_CONCURRENCY=3
       - CELERY_WORKER_PREFETCH_MULTIPLIER=1
@@ -32,6 +32,7 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Ho_Chi_Minh
+      - C_FORCE_ROOT=1
     volumes:
       - ./app:/app/app
       - ./config:/app/config
