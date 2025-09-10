@@ -96,9 +96,21 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             
             logger.info(f"Industry '{industry_name}' -> {len(normalized)} companies (pass {pass_no})")
             
-            # Update task state to completed
-            self.update_state(state='SUCCESS', meta={'industry': industry_name, 'links_count': len(normalized)})
-            return normalized
+            # Update task state to completed with checkpoint info
+            self.update_state(state='SUCCESS', meta={
+                'industry': industry_name, 
+                'links_count': len(normalized),
+                'checkpoint_file': checkpoint_file if normalized else None
+            })
+            
+            # Return only metadata to avoid large result storage issues
+            # The actual links are saved in checkpoint file
+            return {
+                'industry': industry_name,
+                'links_count': len(normalized),
+                'checkpoint_file': checkpoint_file if normalized else None,
+                'status': 'success'
+            }
             
         finally:
             # Optimized cleanup để tránh "Task was destroyed but it is pending"

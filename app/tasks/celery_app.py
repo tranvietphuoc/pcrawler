@@ -26,6 +26,10 @@ celery_app.conf.task_ignore_result = False  # Don't ignore results
 celery_app.conf.task_store_eager_result = True  # Store results immediately
 celery_app.conf.result_compression = 'gzip'  # Compress large results
 celery_app.conf.result_serializer = 'json'  # Use JSON serialization
+celery_app.conf.result_backend_max_retries = 3  # Retry failed result storage
+celery_app.conf.result_backend_always_retry = True  # Always retry result storage
+celery_app.conf.result_backend_retry_delay = 1  # Delay between retries
+celery_app.conf.result_backend_retry_jitter = True  # Add jitter to retry delay
 celery_app.conf.task_routes = {
     # Phase 0: Link fetching
     "links.fetch_industry_links": {"queue": "crawl"},

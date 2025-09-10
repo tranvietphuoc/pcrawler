@@ -160,9 +160,27 @@ async def run(
     logger.info(f"Waiting for {len(link_tasks)} industry link fetching tasks to complete...")
     for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
         try:
-            links = task.get(timeout=1200)  # 20 minutes timeout per industry
-            if not links:
+            result = task.get(timeout=1200)  # 20 minutes timeout per industry
+            if not result or result.get('status') != 'success':
                 logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
+                failed_industries.append((ind_id, ind_name))
+                continue
+            
+            # Get links from checkpoint file
+            checkpoint_file = result.get('checkpoint_file')
+            if not checkpoint_file:
+                logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> No checkpoint file; will retry later")
+                failed_industries.append((ind_id, ind_name))
+                continue
+            
+            # Load links from checkpoint
+            try:
+                import json
+                with open(checkpoint_file, 'r') as f:
+                    links = json.load(f)
+                logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Loaded {len(links)} links from checkpoint")
+            except Exception as e:
+                logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Failed to load checkpoint: {e}; will retry later")
                 failed_industries.append((ind_id, ind_name))
                 continue
             
@@ -172,10 +190,18 @@ async def run(
                 # Try one more time with longer timeout
                 logger.info(f"[{idx}/{len(industries)}] Retrying '{ind_name}' with extended timeout...")
                 retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
-                links_retry = retry_task.get(timeout=1200)
-                if links_retry and len(links_retry) > len(links):
-                    links = links_retry
-                    logger.info(f"[{idx}/{len(industries)}] Retry successful: {len(links)} links")
+                retry_result = retry_task.get(timeout=1200)
+                if retry_result and retry_result.get('status') == 'success':
+                    retry_checkpoint = retry_result.get('checkpoint_file')
+                    if retry_checkpoint:
+                        try:
+                            with open(retry_checkpoint, 'r') as f:
+                                links_retry = json.load(f)
+                            if len(links_retry) > len(links):
+                                links = links_retry
+                                logger.info(f"[{idx}/{len(industries)}] Retry successful: {len(links)} links")
+                        except Exception as e:
+                            logger.warning(f"[{idx}/{len(industries)}] Failed to load retry checkpoint: {e}")
             
             logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> {len(links)} companies")
             all_company_links.extend(links)
