@@ -431,8 +431,9 @@ class ListCrawler(BaseCrawler):
         # Gom link song song: 1 browser/worker, tạo nhiều context/page song song qua context_manager
         seen, uniq = set(), []
 
-        concurrency = 3  # Giảm concurrency để tránh overload server
-        semaphore = asyncio.Semaphore(concurrency)
+        # Đọc concurrency từ config (mặc định 1 để ổn định như chạy tuần tự trước đây)
+        concurrency = self.config.processing_config.get("link_fetch_concurrency", 1)
+        semaphore = asyncio.Semaphore(max(1, int(concurrency)))
 
         async def fetch_with_context(url: str) -> List[str]:
             max_attempts = 3
@@ -442,6 +443,12 @@ class ListCrawler(BaseCrawler):
                 try:
                     async with self.context_manager.get_playwright_context(self.crawler_id, user_agent, viewport) as (context, page):
                         page.set_default_timeout(300000)  # Tăng timeout lên 5 phút
+                        # Jitter nhỏ để tránh đập vào server cùng lúc
+                        try:
+                            import asyncio as _asyncio, random as _random
+                            await _asyncio.sleep(_random.uniform(0.1, 0.4))
+                        except Exception:
+                            pass
                         try:
                             await page.goto(url, timeout=180000, wait_until="domcontentloaded")  # Tăng timeout lên 3 phút
                         except Exception as goto_error:

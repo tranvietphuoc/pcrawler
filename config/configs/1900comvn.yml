@@ -60,6 +60,7 @@ processing:
   industry_load_timeout: 180000  # Tăng lên 3 phút
   industry_scroll_timeout: 240000  # Tăng lên 4 phút
   industry_retry_delay: 3  # Giữ nguyên
+  industry_wave_size: 4
   # Email extraction settings - đơn giản và hiệu quả
   email_extraction_timeout: 30000  # Giảm từ 90s xuống 30s - batch size cao
   email_retry_delay: [4, 8]  # Delay có jitter, cân bằng tốc độ/ổn định

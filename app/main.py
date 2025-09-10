@@ -34,61 +34,71 @@ async def run(config_name: str = "default", base_url: str = None):
     industry_link_counts: Dict[str, int] = {}
     detail_tasks = []
     
-    # Submit link fetching tasks for ALL industries
-    link_tasks = []
-    for idx, (ind_id, ind_name) in enumerate(industries, start=1):
-        logger.info(f"[{idx}/{len(industries)}] Submitting link fetching task for industry '{ind_name}'")
-        task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
-        link_tasks.append((task, ind_id, ind_name))
-    
-    # Collect results and submit detail crawling tasks
-    logger.info(f"Waiting for {len(link_tasks)} industry link fetching tasks to complete...")
+    # Submit link fetching tasks in small waves to avoid overload
+    wave_size = config.processing_config.get("industry_wave_size", 4)
     total_links_processed = 0
-    
-    for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
-        try:
-            result = task.get(timeout=900)  # 15 minutes timeout per industry
-            logger.info(f"[{idx}/{len(link_tasks)}] Industry '{ind_name}' -> Task result: {result}")
-            
-            # Check if task was successful
-            if not result or not result.get('checkpoint_file'):
-                logger.error(f"[{idx}/{len(link_tasks)}] Industry '{ind_name}' -> FAILED; will retry later")
-                failed_industries.append((ind_id, ind_name))
-                continue
-            
-            # Load links from checkpoint file
-            checkpoint_file = result.get('checkpoint_file')
+
+    def iter_waves(items, size):
+        for i in range(0, len(items), size):
+            yield items[i:i+size]
+
+    wave_index = 0
+    for wave in iter_waves(industries, wave_size):
+        wave_index += 1
+        link_tasks = []
+        logger.info(f"Submitting wave {wave_index} with {len(wave)} industries...")
+        for idx, (ind_id, ind_name) in enumerate(wave, start=1):
+            logger.info(f"[wave {wave_index} - {idx}/{len(wave)}] Submitting link fetching task for industry '{ind_name}'")
+            task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
+            link_tasks.append((task, ind_id, ind_name))
+        
+        # Collect results for current wave and submit detail crawling tasks
+        logger.info(f"Waiting for {len(link_tasks)} industry link fetching tasks in wave {wave_index} to complete...")
+        
+        for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
             try:
-                with open(checkpoint_file, 'r') as f:
-                    links = json.load(f)
-                total_links = len(links)
-                logger.info(f"[{idx}/{len(link_tasks)}] Industry '{ind_name}' -> Loaded {total_links} links from checkpoint")
+                result = task.get(timeout=900)  # 15 minutes timeout per industry
+                logger.info(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Task result: {result}")
                 
-                # Submit detail crawling tasks in batches
-                logger.info(f"Submitting detail crawling tasks for industry '{ind_name}' ({total_links} companies) in batches...")
-                batch_count = 0
-                for i in range(0, len(links), batch_size):
-                    batch = links[i:i+batch_size]
-                    batch_count += 1
-                    task = task_crawl_detail_pages.delay(batch, batch_size)
-                    detail_tasks.append(task)
-                    if batch_count % 10 == 0:  # Log progress every 10 batches
-                        logger.info(f"Submitted {batch_count} batches for industry '{ind_name}'...")
+                # Check if task was successful
+                if not result or not result.get('checkpoint_file'):
+                    logger.error(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> FAILED; will retry later")
+                    failed_industries.append((ind_id, ind_name))
+                    continue
                 
-                total_links_processed += total_links
-                industry_link_counts[ind_name] = total_links
-                
-                # Clear links from memory
-                del links
-                
+                # Load links from checkpoint file
+                checkpoint_file = result.get('checkpoint_file')
+                try:
+                    with open(checkpoint_file, 'r') as f:
+                        links = json.load(f)
+                    total_links = len(links)
+                    logger.info(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Loaded {total_links} links from checkpoint")
+                    
+                    # Submit detail crawling tasks in batches
+                    logger.info(f"Submitting detail crawling tasks for industry '{ind_name}' ({total_links} companies) in batches...")
+                    batch_count = 0
+                    for i in range(0, len(links), batch_size):
+                        batch = links[i:i+batch_size]
+                        batch_count += 1
+                        task = task_crawl_detail_pages.delay(batch, batch_size)
+                        detail_tasks.append(task)
+                        if batch_count % 10 == 0:  # Log progress every 10 batches
+                            logger.info(f"[wave {wave_index}] Submitted {batch_count} batches for industry '{ind_name}'...")
+                    
+                    total_links_processed += total_links
+                    industry_link_counts[ind_name] = total_links
+                    
+                    # Clear links from memory
+                    del links
+                    
+                except Exception as e:
+                    logger.error(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Failed to load checkpoint: {e}")
+                    failed_industries.append((ind_id, ind_name))
+                    
             except Exception as e:
-                logger.error(f"[{idx}/{len(link_tasks)}] Industry '{ind_name}' -> Failed to load checkpoint: {e}")
+                logger.error(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> FAILED: {e}")
                 failed_industries.append((ind_id, ind_name))
-                
-        except Exception as e:
-            logger.error(f"[{idx}/{len(link_tasks)}] Industry '{ind_name}' -> FAILED: {e}")
-            failed_industries.append((ind_id, ind_name))
-    
+
     logger.info(f"Total links processed: {total_links_processed} companies across {len(industries)} industries")
     
     # Retry failed industries with longer timeout
