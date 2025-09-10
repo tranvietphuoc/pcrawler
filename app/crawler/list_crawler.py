@@ -56,19 +56,26 @@ class ListCrawler(BaseCrawler):
             return 1
 
     async def _wait_for_network(self, page, timeout: int = None):
-        """Safely wait for networkidle with fallback to domcontentloaded"""
+        """Prefer domcontentloaded + specific selector instead of networkidle to avoid timeouts."""
         if timeout is None:
-            timeout = self.config.processing_config["network_timeout"]
+            timeout = self.config.processing_config.get("network_timeout", 30000)
         try:
-            await page.wait_for_load_state("networkidle", timeout=timeout)
-        except Exception as network_error:
-            error_str = str(network_error)
-            if "Target page, context or browser has been closed" in error_str or "TargetClosedError" in error_str:
-                logger.warning(f"Networkidle failed due to browser closure: {network_error}")
-                raise
-            else:
-                logger.warning(f"Networkidle timeout, falling back to domcontentloaded: {network_error}")
-                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            # Ensure DOM is ready
+            await page.wait_for_load_state("domcontentloaded", timeout=min(timeout, 15000))
+        except Exception as e:
+            logger.warning(f"domcontentloaded wait failed: {e}")
+        # Wait for primary content selector if available
+        try:
+            company_selector = self.config.get_xpath("company_links")
+            await page.wait_for_selector(company_selector, timeout=timeout)
+        except Exception as e:
+            logger.warning(f"wait_for_selector for company_links timed out: {e}")
+            # As a last resort, give a brief settle delay
+            try:
+                import asyncio as _asyncio
+                await _asyncio.sleep(0.3)
+            except Exception:
+                pass
 
     async def _wait_for_select2_ready(self, page, max_wait: int = None) -> bool:
         """Đợi Select2 dropdown sẵn sàng với timeout adaptive"""
@@ -440,13 +447,13 @@ class ListCrawler(BaseCrawler):
                         except Exception as goto_error:
                             if "TargetClosedError" in str(goto_error) or "has been closed" in str(goto_error):
                                 raise
+                        # Wait for target content instead of networkidle to reduce timeouts
                         try:
-                            await page.wait_for_load_state("networkidle", timeout=60000)  # Tăng timeout lên 1 phút
+                            await page.wait_for_selector(self.config.get_xpath("company_links"), timeout=30000)
                         except Exception:
-                            try:
-                                await page.wait_for_load_state("domcontentloaded", timeout=30000)  # Tăng timeout lên 30s
-                            except Exception:
-                                pass
+                            # Small jitter delay to allow late content
+                            import asyncio as _asyncio
+                            await _asyncio.sleep(0.3)
                         locs = await page.locator(self.config.get_xpath("company_links")).all()
                         links = []
                         for a in locs:
