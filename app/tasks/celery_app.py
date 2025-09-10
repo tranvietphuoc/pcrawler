@@ -23,17 +23,19 @@ celery_app.conf.worker_disable_rate_limits = True  # Disable rate limits
 celery_app.conf.task_reject_on_worker_lost = True  # Reject tasks if worker lost
 celery_app.conf.task_acks_on_failure_or_timeout = True  # Ack failed/timeout tasks
 
-# (3) RESULT BACKEND CONFIGURATION - FIX STUCK TASKS
-celery_app.conf.result_expires = 3600  # Results expire after 1 hour
-celery_app.conf.result_persistent = True  # Persist results to disk
+# (3) RESULT BACKEND CONFIGURATION - FIX EXCEPTION SERIALIZATION
+celery_app.conf.result_expires = 1800  # Results expire after 30 minutes
+celery_app.conf.result_persistent = False  # Disable persistence to avoid corruption
 celery_app.conf.task_ignore_result = False  # Don't ignore results
-celery_app.conf.task_store_eager_result = True  # Store results immediately
-celery_app.conf.result_compression = 'gzip'  # Compress large results
-celery_app.conf.result_serializer = 'json'  # Use JSON serialization
-celery_app.conf.result_backend_max_retries = 3  # Retry failed result storage
-celery_app.conf.result_backend_always_retry = True  # Always retry result storage
-celery_app.conf.result_backend_retry_delay = 1  # Delay between retries
-celery_app.conf.result_backend_retry_jitter = True  # Add jitter to retry delay
+celery_app.conf.task_store_eager_result = False  # Don't store eager results
+celery_app.conf.result_compression = None  # Disable compression to avoid issues
+celery_app.conf.result_serializer = 'pickle'  # Use pickle for better exception handling
+celery_app.conf.accept_content = ['pickle', 'json']  # Accept both formats
+celery_app.conf.task_serializer = 'pickle'  # Use pickle for task serialization
+celery_app.conf.result_backend_max_retries = 1  # Reduce retries
+celery_app.conf.result_backend_always_retry = False  # Don't always retry
+celery_app.conf.result_backend_retry_delay = 2  # Increase delay
+celery_app.conf.result_backend_retry_jitter = False  # Disable jitter
 celery_app.conf.task_routes = {
     # Phase 0: Link fetching
     "links.fetch_industry_links": {"queue": "crawl"},

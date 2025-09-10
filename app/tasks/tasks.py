@@ -42,7 +42,8 @@ def _get_or_create_loop():
             _loop_pool[thread_id] = loop
         return _loop_pool[thread_id]
 
-@celery_app.task(name="links.fetch_industry_links", bind=True)
+@celery_app.task(name="links.fetch_industry_links", bind=True, 
+                 autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 5})
 def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """
     Fetch company links for a single industry (optimized with browser reuse and event loop pooling)
@@ -150,10 +151,14 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             
     except Exception as e:
         logger.error(f"Failed to fetch links for industry '{industry_name}': {e}")
-        # Update task state to failed
-        self.update_state(state='FAILURE', meta={'industry': industry_name, 'error': str(e)})
-        # Return empty list but ensure task is marked as completed
-        return []
+        # Update task state to failed with proper exception info
+        self.update_state(state='FAILURE', meta={
+            'industry': industry_name, 
+            'error_type': str(type(e).__name__),
+            'error_message': str(e)
+        })
+        # Re-raise with proper exception type for Celery serialization
+        raise type(e)(f"Industry '{industry_name}' failed: {str(e)}")
 
 async def _fetch_links_with_circuit_breaker_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """Async helper with circuit breaker and health monitoring integration"""
