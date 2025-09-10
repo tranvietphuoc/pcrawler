@@ -77,26 +77,27 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                     item['industry'] = industry_name
                     normalized.append(item)
             
-                # Lưu checkpoint
-                if normalized:
-                    # Sanitize tên industry để tạo tên file hợp lệ
-                    import re
-                    import os
-                    safe_industry_name = re.sub(r'[^\w\s-]', '_', industry_name)  # Thay ký tự đặc biệt bằng _
-                    safe_industry_name = re.sub(r'[-\s]+', '_', safe_industry_name)  # Thay khoảng trắng và - bằng _
-                    safe_industry_name = safe_industry_name.strip('_')  # Bỏ _ ở đầu và cuối
+            # Lưu checkpoint (sau khi hoàn thành chuẩn hoá)
+            checkpoint_file = None
+            if normalized:
+                # Sanitize tên industry để tạo tên file hợp lệ
+                import re
+                import os
+                safe_industry_name = re.sub(r'[^\w\s-]', '_', industry_name)  # Thay ký tự đặc biệt bằng _
+                safe_industry_name = re.sub(r'[-\s]+', '_', safe_industry_name)  # Thay khoảng trắng và - bằng _
+                safe_industry_name = safe_industry_name.strip('_')  # Bỏ _ ở đầu và cuối
+            
+                # Tạo thư mục data nếu chưa tồn tại
+                os.makedirs('/app/data', exist_ok=True)
+                checkpoint_file = f"/app/data/checkpoint_{safe_industry_name}_{pass_no}.json"
                 
-                    # Tạo thư mục data nếu chưa tồn tại
-                    os.makedirs('/app/data', exist_ok=True)
-                    checkpoint_file = f"/app/data/checkpoint_{safe_industry_name}_{pass_no}.json"
-                    
-                    try:
-                        import json
-                        with open(checkpoint_file, 'w') as f:
-                            json.dump(normalized, f, ensure_ascii=False, indent=2)
-                        # logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
-                    except Exception as e:
-                        logger.warning(f"Failed to save checkpoint: {e}")
+                try:
+                    import json
+                    with open(checkpoint_file, 'w') as f:
+                        json.dump(normalized, f, ensure_ascii=False, indent=2)
+                    logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
+                except Exception as e:
+                    logger.warning(f"Failed to save checkpoint: {e}")
             
             logger.info(f"Industry '{industry_name}' -> {len(normalized)} companies (pass {pass_no})")
             
@@ -109,12 +110,13 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             
             # Return only metadata to avoid large result storage issues
             # The actual links are saved in checkpoint file
-            return {
+            result = {
                 'industry': industry_name,
                 'links_count': len(normalized),
-                'checkpoint_file': checkpoint_file if normalized else None,
-                'status': 'success'
+                'checkpoint_file': checkpoint_file if normalized else None
             }
+            logger.info(f"Returning result for '{industry_name}': {result}")
+            return result
             
         finally:
             # Optimized cleanup để tránh "Task was destroyed but it is pending"

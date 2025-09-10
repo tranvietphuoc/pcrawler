@@ -162,7 +162,9 @@ async def run(
     for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
         try:
             result = task.get(timeout=1200)  # 20 minutes timeout per industry
-            if not result or result.get('status') != 'success':
+            logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Task result: {result}")
+            # Check if task was successful by looking for checkpoint_file instead of status
+            if not result or not result.get('checkpoint_file'):
                 logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
                 failed_industries.append((ind_id, ind_name))
                 continue
