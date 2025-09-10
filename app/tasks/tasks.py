@@ -3,12 +3,17 @@ import pandas as pd
 import gc
 import psutil
 import time
+import threading
+from functools import lru_cache
 from app.crawler.contact_crawler import ContactCrawler
 from app.crawler.detail_crawler import DetailCrawler
 from app.crawler.list_crawler import ListCrawler
 from app.extractor.email_extractor import EmailExtractor
 from app.extractor.company_details_extractor import CompanyDetailsExtractor
 from app.database.db_manager import DatabaseManager
+from app.utils.circuit_breaker import circuit_manager
+from app.utils.health_monitor import health_monitor
+from app.utils.error_handler import error_handler, fast_error_check
 from config import CrawlerConfig
 import logging
 
@@ -17,23 +22,42 @@ logger = logging.getLogger(__name__)
 # Import celery app
 from app.tasks.celery_app import celery_app
 
+# Global event loop pool for better performance
+_loop_pool = {}
+_loop_lock = threading.Lock()
+
+@lru_cache(maxsize=1)
+def get_crawler_config():
+    """Cached config instance"""
+    return CrawlerConfig()
+
+def _get_or_create_loop():
+    """Get or create event loop for current thread (optimized)"""
+    thread_id = threading.get_ident()
+    
+    with _loop_lock:
+        if thread_id not in _loop_pool:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            _loop_pool[thread_id] = loop
+        return _loop_pool[thread_id]
+
 @celery_app.task(name="links.fetch_industry_links", bind=True)
 def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """
-    Fetch company links for a single industry (optimized with browser reuse)
+    Fetch company links for a single industry (optimized with browser reuse and event loop pooling)
     """
     try:
-        config = CrawlerConfig()
+        config = get_crawler_config()  # Use cached config
         list_crawler = ListCrawler(config)
         
-        # Tạo event loop mới
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Use pooled event loop for better performance
+        loop = _get_or_create_loop()
         
         try:
             # Fetch links với optimized retry logic
             links = loop.run_until_complete(
-                _fetch_links_optimized_async(list_crawler, base_url, industry_id, industry_name, pass_no)
+                _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no)
             )
             
             # Chuẩn hoá dữ liệu
@@ -71,39 +95,86 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             return normalized
             
         finally:
-            # Proper cleanup để tránh "Task was destroyed but it is pending"
+            # Optimized cleanup để tránh "Task was destroyed but it is pending"
             try:
-                # Cancel all pending tasks
+                # Cancel all pending tasks (optimized)
                 pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
                 if pending_tasks:
-                    logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
                     for task in pending_tasks:
                         task.cancel()
                     
-                    # Wait for cancellation to complete
+                    # Wait for cancellation to complete (with timeout)
                     if pending_tasks:
-                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                        try:
+                            loop.run_until_complete(
+                                asyncio.wait_for(
+                                    asyncio.gather(*pending_tasks, return_exceptions=True),
+                                    timeout=5.0  # 5 second timeout
+                                )
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning("Task cancellation timeout")
                 
                 # Cleanup crawler resources
                 loop.run_until_complete(list_crawler.cleanup())
                 
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
-            finally:
-                # Close loop properly
-                loop.close()
+            # Note: Don't close loop in pool, reuse it
             
     except Exception as e:
         logger.error(f"Failed to fetch links for industry '{industry_name}': {e}")
         return []
 
+async def _fetch_links_with_circuit_breaker_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
+    """Async helper with circuit breaker and health monitoring integration"""
+    # 1. Health check before starting
+    logger.info(f"[{industry_name}] Starting health check...")
+    health = await health_monitor.check_health(list_crawler.context_manager)
+    if not health.is_healthy:
+        logger.warning(f"[{industry_name}] Worker health issues detected: {health.issues}")
+        await health_monitor.cleanup_if_needed(list_crawler.context_manager)
+        logger.info(f"[{industry_name}] Health cleanup completed")
+    else:
+        logger.info(f"[{industry_name}] Worker health OK: {health.memory_usage_mb:.1f}MB, {health.cpu_percent:.1f}% CPU")
+    
+    # 2. Get circuit breaker for this industry
+    breaker = circuit_manager.get_breaker(
+        name=f"industry_links_{industry_id}",
+        failure_threshold=3,  # Lower threshold for faster failover
+        recovery_timeout=120,  # 2 minutes recovery time
+        expected_exception=Exception
+    )
+    
+    # 3. Check circuit breaker state
+    breaker_state = breaker.get_state()
+    logger.info(f"[{industry_name}] Circuit breaker state: {breaker_state['state']}, failures: {breaker_state['failure_count']}")
+    
+    # 4. Use circuit breaker to protect the main operation
+    try:
+        links = await breaker.call(
+            _fetch_links_optimized_async,
+            list_crawler, base_url, industry_id, industry_name, pass_no
+        )
+        logger.info(f"[{industry_name}] Circuit breaker protected operation completed successfully")
+        return links
+    except Exception as e:
+        logger.error(f"[{industry_name}] Circuit breaker protected operation failed: {e}")
+        # Check if circuit is now open
+        final_state = breaker.get_state()
+        if final_state['state'] == 'OPEN':
+            logger.warning(f"[{industry_name}] Circuit breaker is now OPEN - will fail fast for {final_state['recovery_timeout']}s")
+        raise e
+
 async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
     """Optimized async helper for link fetching with smart retry logic"""
     # Adaptive retries/timeouts per pass - tối ưu cho large industries
     if pass_no == 1:
-        retries, timeout_s, delay_s = 4, 300, 5  # Tăng timeout lên 5 phút, 4 retries
+        retries, timeout_s, delay_s = 4, 600, 5  # Tăng timeout lên 10 phút, 4 retries
     else:
-        retries, timeout_s, delay_s = 5, 600, 10  # Tăng timeout lên 10 phút cho pass 2+
+        retries, timeout_s, delay_s = 5, 900, 10  # Tăng timeout lên 15 phút cho pass 2+
     
     for attempt in range(retries + 1):
         try:
@@ -123,32 +194,17 @@ async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id:
         except asyncio.TimeoutError:
             logger.warning(f"[{industry_name}] Timeout on attempt {attempt+1}/{retries+1} (pass {pass_no})")
         except Exception as e:
-            error_msg = str(e)
-            logger.warning(f"[{industry_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {error_msg}")
+            # Optimized error handling
+            error_info = fast_error_check(e)
+            logger.warning(f"[{industry_name}] Error on attempt {attempt+1}/{retries+1} (pass {pass_no}): {error_info['type']} - {error_info['message']}")
             
             # Smart error handling - chỉ restart khi thật sự cần
-            needs_restart = False
+            needs_restart = error_info['is_critical']
             
-            # Critical errors that require browser restart
-            if any(keyword in error_msg for keyword in [
-                "Target page, context or browser has been closed",
-                "TargetClosedError", 
-                "Browser.new_context",
-                "BrowserType.launch",
-                "Protocol error",
-                "Connection lost"
-            ]):
-                needs_restart = True
-                logger.warning(f"[{industry_name}] Critical error detected, browser restart needed...")
-            
-            # Non-critical errors - just retry
-            elif any(keyword in error_msg for keyword in [
-                "Timeout",
-                "Navigation timeout",
-                "Network error",
-                "Connection timeout"
-            ]):
-                logger.info(f"[{industry_name}] Network/timeout error, retrying without restart...")
+            if needs_restart:
+                logger.warning(f"[{industry_name}] Critical error detected ({error_info['category']}), browser restart needed...")
+            else:
+                logger.info(f"[{industry_name}] Non-critical error ({error_info['category']}), retrying without restart...")
             
             # Restart browser if needed
             if needs_restart and attempt < retries:
@@ -159,128 +215,142 @@ async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id:
                 except Exception as cleanup_error:
                     logger.error(f"[{industry_name}] Cleanup failed: {cleanup_error}")
         
-        # Delay before retry (shorter for non-critical errors)
+        # Random uniform delay before retry
         if attempt < retries:
-            wait_time = delay_s * (attempt + 1)
-            logger.info(f"[{industry_name}] Waiting {wait_time}s before retry...")
+            import random
+            # Random delay: base_delay ± 50% jitter
+            base_delay = delay_s * (attempt + 1)
+            min_delay = base_delay * 0.5
+            max_delay = base_delay * 1.5
+            wait_time = random.uniform(min_delay, max_delay)
+            logger.info(f"[{industry_name}] Waiting {wait_time:.1f}s before retry...")
             await asyncio.sleep(wait_time)
     
     logger.error(f"[{industry_name}] All attempts failed (pass {pass_no})")
     return []
 
+async def _crawl_detail_pages_with_circuit_breaker_async(detail_crawler, companies: list, batch_size: int):
+    """Async helper for detail crawling with circuit breaker and health monitoring"""
+    total_companies = len(companies)
+    processed = 0
+    successful = 0
+    failed = 0
+    
+    # 1. Health check before starting
+    logger.info(f"Starting health check for detail crawling...")
+    health = await health_monitor.check_health(detail_crawler.context_manager)
+    if not health.is_healthy:
+        logger.warning(f"Worker health issues detected: {health.issues}")
+        await health_monitor.cleanup_if_needed(detail_crawler.context_manager)
+        logger.info(f"Health cleanup completed")
+    else:
+        logger.info(f"Worker health OK: {health.memory_usage_mb:.1f}MB, {health.cpu_percent:.1f}% CPU")
+    
+    # 2. Get circuit breaker for detail crawling
+    breaker = circuit_manager.get_breaker(
+        name="detail_crawling",
+        failure_threshold=5,  # Higher threshold for detail crawling
+        recovery_timeout=180,  # 3 minutes recovery time
+        expected_exception=Exception
+    )
+    
+    # 3. Process batches with circuit breaker protection
+    for i in range(0, total_companies, batch_size):
+        batch = companies[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        
+        try:
+            # Use circuit breaker to protect batch crawling
+            batch_results = await breaker.call(
+                detail_crawler.crawl_batch,
+                batch
+            )
+            
+            processed += batch_results['total']
+            successful += batch_results['successful']
+            failed += batch_results['failed']
+            
+            logger.info(f"Detail batch {batch_num}: {batch_results['successful']}/{batch_results['total']} successful")
+            
+            # Health check after each batch
+            health = await health_monitor.check_health(detail_crawler.context_manager)
+            if not health.is_healthy:
+                logger.warning(f"Health issues after batch {batch_num}: {health.issues}")
+                await health_monitor.cleanup_if_needed(detail_crawler.context_manager)
+            
+        except Exception as e:
+            logger.error(f"Detail batch {batch_num} failed: {e}")
+            failed += len(batch)
+            processed += len(batch)
+            
+            # Check circuit breaker state
+            breaker_state = breaker.get_state()
+            if breaker_state['state'] == 'OPEN':
+                logger.warning(f"Circuit breaker is OPEN after batch {batch_num} - will fail fast")
+                break  # Stop processing more batches
+            
+            continue
+    
+    # 4. Final cleanup
+    await detail_crawler.cleanup()
+    
+    return {
+        'status': 'completed',
+        'total_companies': total_companies,
+        'processed': processed,
+        'successful': successful,
+        'failed': failed,
+        'message': f'Detail pages crawling completed: {successful}/{total_companies} successful'
+    }
+
 @celery_app.task(name="detail.crawl_and_store", bind=True)
 def crawl_detail_pages(self, companies: list, batch_size: int = 10):
     """
-    Detail Crawler: Chỉ crawl detail pages và lưu HTML vào database (không extract)
+    Detail Crawler: Chỉ crawl detail pages và lưu HTML vào database (không extract) - Optimized
     """
     try:
-        config = CrawlerConfig()
+        config = get_crawler_config()  # Use cached config
         detail_crawler = DetailCrawler(config)
         
-        # Tạo event loop mới
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Use pooled event loop for better performance
+        loop = _get_or_create_loop()
         
         try:
-            # Create fresh browser for this task to prevent context errors
-            # Browser will be created automatically by context manager
-            total_companies = len(companies)
-            processed = 0
-            successful = 0
-            failed = 0
-            
-            # Process theo batch với error handling
-            for i in range(0, total_companies, batch_size):
-                batch = companies[i:i + batch_size]
-                
-                try:
-                    # Memory monitoring
-                    memory_before = psutil.Process().memory_info().rss / 1024 / 1024  # MB
-                    
-                    # Crawl detail pages batch (chỉ lưu HTML, không extract)
-                    batch_results = loop.run_until_complete(detail_crawler.crawl_batch(batch))
-                    
-                    processed += batch_results['total']
-                    successful += batch_results['successful']
-                    failed += batch_results['failed']
-                    
-                    # Memory cleanup after each batch
-                    memory_after = psutil.Process().memory_info().rss / 1024 / 1024  # MB
-                    gc.collect()  # Force garbage collection
-                    memory_after_gc = psutil.Process().memory_info().rss / 1024 / 1024  # MB
-                    
-                    # Update progress
-                    self.update_state(
-                        state='PROGRESS',
-                        meta={
-                            'current': processed,
-                            'total': total_companies,
-                            'successful': successful,
-                            'failed': failed,
-                            'memory_mb': round(memory_after_gc, 1),
-                            'status': f'Crawled detail pages batch {i//batch_size + 1}'
-                        }
-                    )
-                    
-                    logger.info(f"Detail batch {i//batch_size + 1}: {batch_results['successful']}/{batch_results['total']} successful, Memory: {memory_before:.1f}MB → {memory_after_gc:.1f}MB")
-                    
-                    # Memory threshold check
-                    if memory_after_gc > 1000:  # 1GB threshold
-                        logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
-                        loop.run_until_complete(detail_crawler.cleanup())
-                        time.sleep(2)
-                        # Browser will be created automatically by context manager
-                    
-                except Exception as batch_error:
-                    logger.error(f"Detail batch {i//batch_size + 1} failed: {batch_error}")
-                    failed += len(batch)
-                    processed += len(batch)
-                    
-                    # Force cleanup on error
-                    try:
-                        loop.run_until_complete(detail_crawler.cleanup())
-                        time.sleep(1)
-                        # Browser will be created automatically by context manager
-                    except:
-                        pass
-                    
-                    # Continue with next batch instead of failing entire task
-                    continue
-            
-            # Cleanup
-            loop.run_until_complete(detail_crawler.cleanup())
-        
-            return {
-                'status': 'completed',
-                'total_companies': total_companies,
-                'processed': processed,
-                'successful': successful,
-                'failed': failed,
-                'message': f'Detail pages crawling completed: {successful}/{total_companies} successful'
-            }
+            # Use circuit breaker and health monitoring for detail crawling
+            result = loop.run_until_complete(
+                _crawl_detail_pages_with_circuit_breaker_async(detail_crawler, companies, batch_size)
+            )
+            return result
             
         finally:
-            # Proper cleanup để tránh "Task was destroyed but it is pending"
+            # Optimized cleanup để tránh "Task was destroyed but it is pending"
             try:
-                # Cancel all pending tasks
+                # Cancel all pending tasks (optimized)
                 pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
                 if pending_tasks:
-                    logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
                     for task in pending_tasks:
                         task.cancel()
                     
-                    # Wait for cancellation to complete
+                    # Wait for cancellation to complete (with timeout)
                     if pending_tasks:
-                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                        try:
+                            loop.run_until_complete(
+                                asyncio.wait_for(
+                                    asyncio.gather(*pending_tasks, return_exceptions=True),
+                                    timeout=5.0  # 5 second timeout
+                                )
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning("Task cancellation timeout")
                 
                 # Cleanup crawler resources
                 loop.run_until_complete(detail_crawler.cleanup())
                 
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
-            finally:
-                # Close loop properly
-                loop.close()
+            # Note: Don't close loop in pool, reuse it
             
     except Exception as e:
         logger.error(f"Detail pages crawling failed: {e}")
@@ -291,6 +361,38 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
             'processed': 0,
             'successful': 0,
             'failed': 0
+        }
+
+@celery_app.task(name="health.check_worker_health", bind=True)
+def check_worker_health(self):
+    """
+    Health check task for monitoring worker status
+    """
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            health_summary = health_monitor.get_health_summary()
+            circuit_states = loop.run_until_complete(circuit_manager.get_all_states())
+            
+            logger.info(f"Health check completed: {health_summary}")
+            
+            return {
+                "status": "success",
+                "health": health_summary,
+                "circuit_breakers": circuit_states,
+                "timestamp": time.time()
+            }
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
         }
 
 @celery_app.task(name="contact.crawl_from_details", bind=True)

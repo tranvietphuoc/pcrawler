@@ -41,29 +41,24 @@ crawl4ai:
   facebook_query: "Return only business emails from Facebook About/Intro/Contact section. Output exactly: valid emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
 
 processing:
-  # batch_size: 30 (cũ)
-  batch_size: 50   # Giảm từ 200 xuống 50 - tối ưu memory per task
-  # write_batch_size: 150 (cũ)
-  write_batch_size: 200  # Tăng từ 150 lên 200
-  # max_concurrent_pages: 5 (cũ)
-  max_concurrent_pages: 5  # Giảm từ 8 xuống 5 - batch size cao
+  # OPTIMIZED SETTINGS FOR BETTER PERFORMANCE
+  batch_size: 75   # Tăng từ 50 lên 75 - tối ưu throughput
+  write_batch_size: 300  # Tăng từ 200 lên 300 - giảm I/O overhead
+  max_concurrent_pages: 6  # Tăng từ 5 lên 6 - tận dụng CPU tốt hơn
   max_retries: 5  # Giữ nguyên
-  # delay_range: [3, 8] (cũ) - tăng từ [2,6] lên [3,8] - đợi lâu hơn
-  delay_range: [2, 5]  # Giảm từ [3,8] xuống [2,5] - CPU mạnh xử lý nhanh
-  # batch_delay: [6, 12] (cũ)
-  batch_delay: [4, 8]  # Giảm từ [6,12] xuống [4,8]
-  # session_delay: [12, 25] (cũ)
-  session_delay: [8, 15]  # Giảm từ [12,25] xuống [8,15]
-  timeout: 90000  # Giảm từ 120s xuống 90s để tránh browser timeout
-  network_timeout: 60000  # Giảm từ 90s xuống 60s để tránh browser đóng
+  delay_range: [1.5, 4]  # Giảm từ [2,5] xuống [1.5,4] - tăng tốc độ
+  batch_delay: [3, 6]  # Giảm từ [4,8] xuống [3,6] - tăng throughput
+  session_delay: [6, 12]  # Giảm từ [8,15] xuống [6,12] - tăng tốc độ
+  timeout: 180000  # Tăng lên 3 phút để tránh timeout
+  network_timeout: 120000  # Tăng lên 2 phút để tránh browser đóng
   # page_load_wait: 2000 (cũ)
   page_load_wait: 1500  # Giảm từ 2000 xuống 1500
   # js_load_wait: 3000 (cũ)
   js_load_wait: 2000  # Giảm từ 3000 xuống 2000
   stealth_mode: true
   # Industry loading settings - đơn giản
-  industry_load_timeout: 90000  # Tăng từ 60s lên 90s
-  industry_scroll_timeout: 120000  # Tăng từ 90s lên 120s
+  industry_load_timeout: 180000  # Tăng lên 3 phút
+  industry_scroll_timeout: 240000  # Tăng lên 4 phút
   industry_retry_delay: 3  # Giữ nguyên
   # Email extraction settings - đơn giản và hiệu quả
   email_extraction_timeout: 30000  # Giảm từ 90s xuống 30s - batch size cao

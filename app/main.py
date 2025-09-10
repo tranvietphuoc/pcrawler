@@ -134,7 +134,12 @@ async def run(
                     except Exception as cleanup_error:
                         logger.warning(f"[{ind_name}] Browser cleanup failed: {cleanup_error}")
                 
-            await asyncio.sleep(delay_s)
+                # Random uniform delay
+                import random
+                min_delay = delay_s * 0.5
+                max_delay = delay_s * 1.5
+                random_delay = random.uniform(min_delay, max_delay)
+                await asyncio.sleep(random_delay)
         logger.error(f"[{ind_name}] Failed after {retries+1} attempts (pass {pass_no})")
         return links_local
 
@@ -155,7 +160,7 @@ async def run(
     logger.info(f"Waiting for {len(link_tasks)} industry link fetching tasks to complete...")
     for idx, (task, ind_id, ind_name) in enumerate(link_tasks, start=1):
         try:
-            links = task.get(timeout=600)  # 10 minutes timeout per industry
+            links = task.get(timeout=1200)  # 20 minutes timeout per industry
             if not links:
                 logger.error(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> FAILED on pass 1; will retry later")
                 failed_industries.append((ind_id, ind_name))
@@ -167,7 +172,7 @@ async def run(
                 # Try one more time with longer timeout
                 logger.info(f"[{idx}/{len(industries)}] Retrying '{ind_name}' with extended timeout...")
                 retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 1)
-                links_retry = retry_task.get(timeout=600)
+                links_retry = retry_task.get(timeout=1200)
                 if links_retry and len(links_retry) > len(links):
                     links = links_retry
                     logger.info(f"[{idx}/{len(industries)}] Retry successful: {len(links)} links")
@@ -221,8 +226,9 @@ async def run(
                 t = task_crawl_detail_pages.delay(batch, batch_size)
                 detail_tasks.append(t)
             
-            # Delay giữa các industry retry
-            await asyncio.sleep(2)
+            # Random uniform delay giữa các industry retry
+            import random
+            await asyncio.sleep(random.uniform(1, 3))
 
     # Báo cáo industry nào còn 0 link sau 2 pass (để đảm bảo không sót)
     zero_link_industries = [name for name in [n for _, n in industries] if industry_link_counts.get(name, 0) == 0]
@@ -239,7 +245,7 @@ async def run(
             # Browser will be created automatically by context manager
             
             # Aggressive retry settings for final attempt
-            retries, timeout_s, delay_s = 5, 600, 10  # 10 minutes timeout, 5 retries, 10s delay
+            retries, timeout_s, delay_s = 5, 1200, 10  # 20 minutes timeout, 5 retries, 10s delay
             links_local = []
             
             for attempt in range(retries + 1):
@@ -256,7 +262,12 @@ async def run(
                     logger.warning(f"[Final Attempt] {ind_name} - Timeout on attempt {attempt+1}/{retries+1}")
                 except Exception as e:
                     logger.warning(f"[Final Attempt] {ind_name} - Error on attempt {attempt+1}/{retries+1}: {e}")
-                await asyncio.sleep(delay_s)
+                # Random uniform delay for final attempt
+                import random
+                min_delay = delay_s * 0.5
+                max_delay = delay_s * 1.5
+                random_delay = random.uniform(min_delay, max_delay)
+                await asyncio.sleep(random_delay)
             
             if links_local:
                 logger.info(f"[Final Attempt] {ind_name} - SUCCESS! Got {len(links_local)} links")
@@ -282,11 +293,14 @@ async def run(
                     batch = normalized[i:i+batch_size]
                     t = task_crawl_detail_pages.delay(batch, batch_size)
                     detail_tasks.append(t)
-                    # Delay nhỏ giữa các batch để tránh overload
+                    # Random uniform delay nhỏ giữa các batch để tránh overload
                     if i % (batch_size * 5) == 0:  # Delay mỗi 5 batches
-                        await asyncio.sleep(2)
+                        import random
+                        await asyncio.sleep(random.uniform(1, 3))
                 
-                await asyncio.sleep(5)  # Longer delay for final attempt
+                # Random uniform delay for final attempt
+                import random
+                await asyncio.sleep(random.uniform(3, 7))
             else:
                 logger.error(f"[Final Attempt] {ind_name} - FAILED after {retries+1} attempts, giving up")
         

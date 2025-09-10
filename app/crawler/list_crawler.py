@@ -36,7 +36,9 @@ class ListCrawler(BaseCrawler):
             except Exception:
                 if i == self.max_retries - 1:
                     return 1
-                await asyncio.sleep(random.uniform(2, 5))
+                # Random uniform delay with jitter
+                import random
+                await asyncio.sleep(random.uniform(1.5, 4.5))
 
     async def _get_total_pages_current(self, page) -> int:
         try:
@@ -85,16 +87,22 @@ class ListCrawler(BaseCrawler):
                 if await select2_selection.count() > 0:
                     # Thử click để mở dropdown
                     await select2_selection.first.dispatch_event("mousedown")
-                    await asyncio.sleep(1)
+                    # Random uniform delay
+                    import random
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
 
                     # Kiểm tra xem dropdown có mở không
                     results_panel = page.locator(self.config.get_xpath("industry_results"))
                     if await results_panel.count() > 0:
                         return True
                 
-                await asyncio.sleep(2)
+                # Random uniform delay
+                import random
+                await asyncio.sleep(random.uniform(1.5, 2.5))
             except Exception:
-                await asyncio.sleep(2)
+                # Random uniform delay
+                import random
+                await asyncio.sleep(random.uniform(1.5, 2.5))
                 continue
         
         return False
@@ -129,8 +137,9 @@ class ListCrawler(BaseCrawler):
                     "ul.select2-results__options",
                 )
                 
-                # Giảm delay để tăng tốc độ
-                await asyncio.sleep(0.5)  # Giảm từ 1.0s xuống 0.5s
+                # Random uniform delay để tăng tốc độ
+                import random
+                await asyncio.sleep(random.uniform(0.3, 0.7))
                 
                 # Force garbage collection mỗi 20 attempts để giảm memory
                 if attempt % 20 == 0:
@@ -139,7 +148,9 @@ class ListCrawler(BaseCrawler):
                 
             except Exception as e:
                 logger.warning(f"Scroll attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(0.5)  # Giảm sleep time
+                # Random uniform delay
+                import random
+                await asyncio.sleep(random.uniform(0.3, 0.7))
                 continue
         
         # Fallback: trả về số lượng hiện tại
@@ -238,8 +249,13 @@ class ListCrawler(BaseCrawler):
                 logger.error(f"Attempt {retry + 1} failed: {e}")
                 
                 if retry < max_retries - 1:
-                    wait_time = (retry + 1) * retry_delay  # Tăng thời gian chờ mỗi lần retry
-                    logger.info(f"Retrying in {wait_time} seconds...")
+                    # Random uniform delay với progressive increase
+                    import random
+                    base_delay = (retry + 1) * retry_delay
+                    min_delay = base_delay * 0.7
+                    max_delay = base_delay * 1.3
+                    wait_time = random.uniform(min_delay, max_delay)
+                    logger.info(f"Retrying in {wait_time:.1f} seconds...")
                     await asyncio.sleep(wait_time)
                 else:
                     logger.error("All attempts failed. Returning empty list.")
@@ -260,7 +276,9 @@ class ListCrawler(BaseCrawler):
         search_input = page.locator(self.config.get_xpath("industry_search"))
         if await search_input.count():
             await search_input.first.fill(industry_name)
-            await asyncio.sleep(0.3)
+            # Random uniform delay
+            import random
+            await asyncio.sleep(random.uniform(0.2, 0.4))
 
         # chọn option theo tên (exact match theo normalize-space)
         option = page.locator(
@@ -349,7 +367,9 @@ class ListCrawler(BaseCrawler):
                 except Exception:
                     if i == self.max_retries - 1:
                         return []
-                await asyncio.sleep(random.uniform(1, 2))
+                # Random uniform delay
+                import random
+                await asyncio.sleep(random.uniform(0.8, 1.8))
         else:
             # Sử dụng page đã có
             try:
@@ -440,14 +460,20 @@ class ListCrawler(BaseCrawler):
                 except Exception as e:
                     msg = str(e)
                     if attempt < max_attempts - 1 and ("TargetClosedError" in msg or "has been closed" in msg or "Timeout" in msg):
-                        await asyncio.sleep(1.0 * (attempt + 1))
+                        # Random uniform delay với progressive increase
+                        import random
+                        base_delay = 1.0 * (attempt + 1)
+                        min_delay = base_delay * 0.8
+                        max_delay = base_delay * 1.2
+                        await asyncio.sleep(random.uniform(min_delay, max_delay))
                         continue
                     return []
 
         async def worker(url: str):
             async with semaphore:
-                # Thêm delay để tránh rate limiting
-                await asyncio.sleep(random.uniform(1, 3))
+                # Random uniform delay để tránh rate limiting
+                import random
+                await asyncio.sleep(random.uniform(0.8, 2.5))
                 links = await fetch_with_context(url)
                 if links:
                     for link in links:

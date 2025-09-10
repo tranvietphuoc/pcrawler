@@ -4,6 +4,7 @@ import psutil
 import gc
 import os
 import time
+import weakref
 from contextlib import asynccontextmanager
 from typing import Dict, Optional, Any
 from playwright.async_api import async_playwright
@@ -18,11 +19,13 @@ class AsyncBrowserContextManager:
     """
     
     def __init__(self):
-        self._browsers: Dict[str, Any] = {}
+        # Use weak references for better memory management
+        self._browsers: Dict[str, weakref.ref] = {}
         self._active_contexts: Dict[str, int] = {}
         self._request_counts: Dict[str, int] = {}
         self._last_restart: Dict[str, float] = {}
         self._memory_usage: Dict[str, float] = {}
+        
         # Auto-generate worker_id from container name or environment
         container_name = os.getenv('HOSTNAME', 'default')
         self._worker_id = f"worker_{container_name}"
@@ -31,28 +34,45 @@ class AsyncBrowserContextManager:
         # Create worker-specific lock (not singleton)
         self._lock = asyncio.Lock()
         
-        # Enhanced resource limits with process isolation
-        self._max_contexts_per_worker = 2  # Further reduced for better isolation
-        self._browser_restart_threshold = 50  # Less aggressive restart to avoid conflicts
-        self._context_lifetime = 180  # Longer lifetime to avoid premature closure
-        self._memory_threshold_mb = 400  # Lower memory limit per browser
-        self._max_memory_per_worker_mb = 800  # Lower total memory limit per worker
+        # Enhanced resource limits with process isolation - OPTIMIZED
+        self._max_contexts_per_worker = 4  # Tăng từ 2 lên 4 cho better concurrency
+        self._browser_restart_threshold = 75  # Tăng từ 50 lên 75 để giảm restart frequency
+        self._context_lifetime = 240  # Tăng từ 180 lên 240s để tái sử dụng context lâu hơn
+        self._memory_threshold_mb = 600  # Tăng từ 400 lên 600MB per browser
+        self._max_memory_per_worker_mb = 1200  # Tăng từ 800 lên 1200MB per worker
         
         # Process isolation settings
         self._worker_browser_pool = {}  # Separate browser pool per worker
         self._worker_memory_tracker = {}  # Memory tracking per worker
         self._restart_suspended: Dict[str, bool] = {}  # Suspend restarts per worker
         
-        logger.info(f"AsyncBrowserContextManager initialized for worker {self._worker_id} (PID: {self._process_id})")
+        # Cache for performance
+        self._process = psutil.Process()
+        self._last_memory_check = 0.0
+        self._memory_cache_ttl = 2.0  # Cache memory check for 2 seconds
+        
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"AsyncBrowserContextManager initialized for worker {self._worker_id} (PID: {self._process_id})")
     
     async def _get_worker_memory_usage(self) -> float:
-        """Get current memory usage for this worker process"""
+        """Get current memory usage for this worker process (optimized with caching)"""
+        current_time = time.time()
+        
+        # Use cache if still valid
+        if current_time - self._last_memory_check < self._memory_cache_ttl:
+            return getattr(self, '_cached_memory_usage', 0.0)
+        
         try:
-            process = psutil.Process(self._process_id)
-            memory_mb = process.memory_info().rss / 1024 / 1024
+            memory_mb = self._process.memory_info().rss / 1048576  # Faster than /1024/1024
+            
+            # Cache the result
+            self._cached_memory_usage = memory_mb
+            self._last_memory_check = current_time
+            
             return memory_mb
         except Exception as e:
-            logger.warning(f"Failed to get memory usage: {e}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Failed to get memory usage: {e}")
             return 0.0
     
     async def _check_memory_pressure(self) -> bool:
