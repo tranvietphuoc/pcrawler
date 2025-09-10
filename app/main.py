@@ -176,6 +176,9 @@ async def run(
             # Load links from checkpoint
             try:
                 import json
+                import os
+                # Tạo thư mục data nếu chưa tồn tại
+                os.makedirs('/app/data', exist_ok=True)
                 with open(checkpoint_file, 'r') as f:
                     links = json.load(f)
                 logger.info(f"[{idx}/{len(industries)}] Industry '{ind_name}' -> Loaded {len(links)} links from checkpoint")

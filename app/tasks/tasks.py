@@ -77,22 +77,26 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                     item['industry'] = industry_name
                     normalized.append(item)
             
-            # Lưu checkpoint
-            if normalized:
-                # Sanitize tên industry để tạo tên file hợp lệ
-                import re
-                safe_industry_name = re.sub(r'[^\w\s-]', '_', industry_name)  # Thay ký tự đặc biệt bằng _
-                safe_industry_name = re.sub(r'[-\s]+', '_', safe_industry_name)  # Thay khoảng trắng và - bằng _
-                safe_industry_name = safe_industry_name.strip('_')  # Bỏ _ ở đầu và cuối
+                # Lưu checkpoint
+                if normalized:
+                    # Sanitize tên industry để tạo tên file hợp lệ
+                    import re
+                    import os
+                    safe_industry_name = re.sub(r'[^\w\s-]', '_', industry_name)  # Thay ký tự đặc biệt bằng _
+                    safe_industry_name = re.sub(r'[-\s]+', '_', safe_industry_name)  # Thay khoảng trắng và - bằng _
+                    safe_industry_name = safe_industry_name.strip('_')  # Bỏ _ ở đầu và cuối
                 
-                checkpoint_file = f"/tmp/checkpoint_{safe_industry_name}_{pass_no}.json"
-                try:
-                    import json
-                    with open(checkpoint_file, 'w') as f:
-                        json.dump(normalized, f, ensure_ascii=False, indent=2)
-                    logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
-                except Exception as e:
-                    logger.warning(f"Failed to save checkpoint: {e}")
+                    # Tạo thư mục data nếu chưa tồn tại
+                    os.makedirs('/app/data', exist_ok=True)
+                    checkpoint_file = f"/app/data/checkpoint_{safe_industry_name}_{pass_no}.json"
+                    
+                    try:
+                        import json
+                        with open(checkpoint_file, 'w') as f:
+                            json.dump(normalized, f, ensure_ascii=False, indent=2)
+                        logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
+                    except Exception as e:
+                        logger.warning(f"Failed to save checkpoint: {e}")
             
             logger.info(f"Industry '{industry_name}' -> {len(normalized)} companies (pass {pass_no})")
             
