@@ -47,6 +47,9 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
     """
     Fetch company links for a single industry (optimized with browser reuse and event loop pooling)
     """
+    # Update task state
+    self.update_state(state='PROGRESS', meta={'industry': industry_name, 'status': 'starting'})
+    
     try:
         config = get_crawler_config()  # Use cached config
         list_crawler = ListCrawler(config)
@@ -92,6 +95,9 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                     logger.warning(f"Failed to save checkpoint: {e}")
             
             logger.info(f"Industry '{industry_name}' -> {len(normalized)} companies (pass {pass_no})")
+            
+            # Update task state to completed
+            self.update_state(state='SUCCESS', meta={'industry': industry_name, 'links_count': len(normalized)})
             return normalized
             
         finally:
@@ -126,6 +132,9 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             
     except Exception as e:
         logger.error(f"Failed to fetch links for industry '{industry_name}': {e}")
+        # Update task state to failed
+        self.update_state(state='FAILURE', meta={'industry': industry_name, 'error': str(e)})
+        # Return empty list but ensure task is marked as completed
         return []
 
 async def _fetch_links_with_circuit_breaker_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):

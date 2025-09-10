@@ -18,6 +18,14 @@ celery_app.conf.include = ["app.tasks.tasks"]
 celery_app.conf.task_default_queue = "crawl"
 celery_app.conf.task_queues = (Queue("crawl"),)
 celery_app.conf.worker_prefetch_multiplier = 1
+
+# (3) RESULT BACKEND CONFIGURATION - FIX STUCK TASKS
+celery_app.conf.result_expires = 3600  # Results expire after 1 hour
+celery_app.conf.result_persistent = True  # Persist results to disk
+celery_app.conf.task_ignore_result = False  # Don't ignore results
+celery_app.conf.task_store_eager_result = True  # Store results immediately
+celery_app.conf.result_compression = 'gzip'  # Compress large results
+celery_app.conf.result_serializer = 'json'  # Use JSON serialization
 celery_app.conf.task_routes = {
     # Phase 0: Link fetching
     "links.fetch_industry_links": {"queue": "crawl"},
