@@ -94,7 +94,7 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                         import json
                         with open(checkpoint_file, 'w') as f:
                             json.dump(normalized, f, ensure_ascii=False, indent=2)
-                        logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
+                        # logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
                     except Exception as e:
                         logger.warning(f"Failed to save checkpoint: {e}")
             
