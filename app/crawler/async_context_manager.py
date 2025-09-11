@@ -29,7 +29,11 @@ class AsyncBrowserContextManager:
         # Auto-generate worker_id from container name or environment
         container_name = os.getenv('HOSTNAME', 'default')
         process_id = os.getpid()
-        thread_id = id(asyncio.current_task()) if asyncio.current_task() else 0
+        try:
+            thread_id = id(asyncio.current_task()) if asyncio.current_task() else 0
+        except RuntimeError:
+            # No event loop running
+            thread_id = 0
         # Add unique timestamp and random component for better isolation
         import uuid
         unique_id = str(uuid.uuid4())[:8]
@@ -37,7 +41,12 @@ class AsyncBrowserContextManager:
         self._process_id = process_id
         
         # Create worker-specific lock (not singleton)
-        self._lock = asyncio.Lock()
+        try:
+            self._lock = asyncio.Lock()
+        except RuntimeError:
+            # No event loop running, use threading.Lock instead
+            import threading
+            self._lock = threading.Lock()
         
         # Enhanced resource limits with process isolation - SCALING OPTIMIZED
         self._max_contexts_per_worker = 3  # Giảm xuống 3 cho scaling stability
@@ -217,8 +226,12 @@ class AsyncBrowserContextManager:
         if self._browser_persistence_enabled:
             self._browser_last_activity[worker_key] = time.time()
             self._browser_connection_status[worker_key] = "connected"
-            keepalive_task = asyncio.create_task(self._browser_keepalive(worker_key))
-            self._browser_keepalive_tasks[worker_key] = keepalive_task
+            try:
+                keepalive_task = asyncio.create_task(self._browser_keepalive(worker_key))
+                self._browser_keepalive_tasks[worker_key] = keepalive_task
+            except RuntimeError:
+                # No event loop running, skip keepalive
+                logger.warning(f"No event loop for keepalive task {worker_key}")
             logger.info(f"Started keep-alive for browser {worker_key}")
         
         return browser

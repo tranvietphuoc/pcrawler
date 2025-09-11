@@ -22,9 +22,7 @@ logger = logging.getLogger(__name__)
 # Import celery app
 from app.tasks.celery_app import celery_app
 
-# Global event loop pool for better performance
-_loop_pool = {}
-_loop_lock = threading.Lock()
+# Solo pool doesn't need loop pooling
 
 @lru_cache(maxsize=1)
 def get_crawler_config():
@@ -32,47 +30,16 @@ def get_crawler_config():
     return CrawlerConfig()
 
 def _get_or_create_loop():
-    """Get or create event loop for current thread (optimized)"""
-    thread_id = threading.get_ident()
-    
-    with _loop_lock:
-        if thread_id not in _loop_pool:
-            try:
-                # Try to get existing loop first
-                loop = asyncio.get_event_loop()
-                if loop.is_closed():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-            except RuntimeError:
-                # No event loop exists, create new one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            _loop_pool[thread_id] = loop
-        return _loop_pool[thread_id]
-
-def _run_with_fresh_loop(coro, original_loop=None):
-    """Run async coroutine with fresh event loop to avoid conflicts"""
-    import asyncio
-    
-    # Create fresh loop
-    new_loop = asyncio.new_event_loop()
-    
+    """Get or create event loop for current thread (solo pool compatible)"""
     try:
-        # Set as current loop and run coroutine
-        asyncio.set_event_loop(new_loop)
-        result = new_loop.run_until_complete(coro)
-        return result
-    finally:
-        # Cleanup and restore original loop
-        new_loop.close()
-        if original_loop:
-            asyncio.set_event_loop(original_loop)
-        else:
-            # Clear event loop if no original loop
-            try:
-                asyncio.set_event_loop(None)
-            except:
-                pass
+        # Try to get existing loop first
+        loop = asyncio.get_running_loop()
+        return loop
+    except RuntimeError:
+        # No running loop, create new one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
 
 @celery_app.task(name="links.fetch_industry_links", bind=True)
 def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
@@ -86,9 +53,12 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
         config = get_crawler_config()  # Use cached config
         list_crawler = ListCrawler(config)
         
+        # Solo pool compatible: create new loop for each task
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            # Fetch links với optimized retry logic - use fresh loop
-            links = _run_with_fresh_loop(
+            # Fetch links với optimized retry logic
+            links = loop.run_until_complete(
                 _fetch_links_with_circuit_breaker_async(list_crawler, base_url, industry_id, industry_name, pass_no)
             )
             
@@ -115,7 +85,7 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                 safe_industry_name = re.sub(r'[^\w\s-]', '_', industry_name)  # Thay ký tự đặc biệt bằng _
                 safe_industry_name = re.sub(r'[-\s]+', '_', safe_industry_name)  # Thay khoảng trắng và - bằng _
                 safe_industry_name = safe_industry_name.strip('_')  # Bỏ _ ở đầu và cuối
-            
+                
                 # Tạo thư mục data nếu chưa tồn tại
                 os.makedirs('/app/data', exist_ok=True)
                 checkpoint_file = f"/app/data/checkpoint_{safe_industry_name}_{pass_no}.json"
@@ -148,49 +118,27 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
             return result
             
         finally:
-            # Optimized cleanup để tránh "Task was destroyed but it is pending"
+            # Solo pool cleanup: close loop after task
             try:
-                # Cancel all pending tasks (optimized)
-                pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
-                if pending_tasks:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
-                    for task in pending_tasks:
-                        task.cancel()
-                    
-                    # Wait for cancellation to complete (with timeout)
-                    if pending_tasks:
-                        try:
-                            _run_with_fresh_loop(
-                                asyncio.wait_for(
-                                    asyncio.gather(*pending_tasks, return_exceptions=True),
-                                    timeout=5.0  # 5 second timeout
-                                )
-                            )
-                        except asyncio.TimeoutError:
-                            logger.warning("Task cancellation timeout")
-                
                 # Cleanup crawler resources
-                _run_with_fresh_loop(list_crawler.cleanup())
-                
+                loop.run_until_complete(list_crawler.cleanup())
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
-            # Note: Don't close loop in pool, reuse it
+            finally:
+                # Close loop
+                loop.close()
+                asyncio.set_event_loop(None)
             
     except Exception as e:
         logger.error(f"Failed to fetch links for industry '{industry_name}': {e}")
-        # Update task state to failed with proper exception info
-        self.update_state(state='FAILURE', meta={
-            'industry': industry_name, 
-            'error_type': str(type(e).__name__),
-            'error_message': str(e)[:500]  # Truncate long messages for JSON
-        })
-        # Don't re-raise to avoid serialization issues, just return error result
+        # Update task state to failed
+        self.update_state(state='FAILURE', meta={'industry': industry_name, 'error': str(e)})
+        # Return proper error result instead of empty list
         return {
             'industry': industry_name,
             'links_count': 0,
             'checkpoint_file': None,
-            'error': str(e)[:500]
+            'error': str(e)
         }
 
 async def _fetch_links_with_circuit_breaker_async(list_crawler, base_url: str, industry_id: str, industry_name: str, pass_no: int = 1):
@@ -237,9 +185,9 @@ async def _fetch_links_optimized_async(list_crawler, base_url: str, industry_id:
     """Optimized async helper for link fetching with smart retry logic"""
     # Adaptive retries/timeouts per pass - tối ưu cho large industries
     if pass_no == 1:
-        retries, timeout_s, delay_s = 2, 240, 2  # Giảm timeout xuống 4 phút, 2 retries
+        retries, timeout_s, delay_s = 4, 600, 5  # Tăng timeout lên 10 phút, 4 retries
     else:
-        retries, timeout_s, delay_s = 3, 480, 3  # Tăng timeout lên 8 phút cho pass 2+
+        retries, timeout_s, delay_s = 4, 600, 5  # Tăng timeout lên 10 phút cho pass 2+
     
     for attempt in range(retries + 1):
         try:
@@ -347,7 +295,7 @@ async def _crawl_detail_pages_with_circuit_breaker_async(detail_crawler, compani
             if not health.is_healthy:
                 logger.warning(f"Health issues after batch {batch_num}: {health.issues}")
                 await health_monitor.cleanup_if_needed(detail_crawler.context_manager)
-            
+                
         except Exception as e:
             logger.error(f"Detail batch {batch_num} failed: {e}")
             failed += len(batch)
@@ -382,42 +330,27 @@ def crawl_detail_pages(self, companies: list, batch_size: int = 10):
         config = get_crawler_config()  # Use cached config
         detail_crawler = DetailCrawler(config)
         
+        # Solo pool compatible: create new loop for each task
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            # Use circuit breaker and health monitoring for detail crawling - use fresh loop
-            result = _run_with_fresh_loop(
+            # Use circuit breaker and health monitoring for detail crawling
+            result = loop.run_until_complete(
                 _crawl_detail_pages_with_circuit_breaker_async(detail_crawler, companies, batch_size)
             )
             return result
             
         finally:
-            # Optimized cleanup để tránh "Task was destroyed but it is pending"
+            # Solo pool cleanup: close loop after task
             try:
-                # Cancel all pending tasks (optimized)
-                pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
-                if pending_tasks:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Cancelling {len(pending_tasks)} pending tasks...")
-                    for task in pending_tasks:
-                        task.cancel()
-                    
-                    # Wait for cancellation to complete (with timeout)
-                    if pending_tasks:
-                        try:
-                            _run_with_fresh_loop(
-                                asyncio.wait_for(
-                                    asyncio.gather(*pending_tasks, return_exceptions=True),
-                                    timeout=5.0  # 5 second timeout
-                                )
-                            )
-                        except asyncio.TimeoutError:
-                            logger.warning("Task cancellation timeout")
-                
                 # Cleanup crawler resources
-                _run_with_fresh_loop(detail_crawler.cleanup())
-                
+                loop.run_until_complete(detail_crawler.cleanup())
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
-            # Note: Don't close loop in pool, reuse it
+            finally:
+                # Close loop
+                loop.close()
+                asyncio.set_event_loop(None)
             
     except Exception as e:
         logger.error(f"Detail pages crawling failed: {e}")
@@ -441,9 +374,7 @@ def check_worker_health(self):
         
         try:
             health_summary = health_monitor.get_health_summary()
-            circuit_states = _run_with_fresh_loop(
-                circuit_manager.get_all_states()
-            )
+            circuit_states = loop.run_until_complete(circuit_manager.get_all_states())
             
             logger.info(f"Health check completed: {health_summary}")
             
@@ -507,9 +438,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     memory_before = psutil.Process().memory_info().rss / 1024 / 1024  # MB
                     
                     # Crawl contact pages batch
-                    batch_results = _run_with_fresh_loop(
-                        contact_crawler.crawl_batch_from_details(batch)
-                    )
+                    batch_results = loop.run_until_complete(contact_crawler.crawl_batch_from_details(batch))
                     
                     processed += batch_results['total']
                     successful += batch_results['successful']
@@ -538,10 +467,10 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     # Memory threshold check
                     if memory_after_gc > 1000:  # 1GB threshold
                         logger.warning(f"High memory usage: {memory_after_gc:.1f}MB, forcing cleanup")
-                        _run_with_fresh_loop(contact_crawler.cleanup())
+                        loop.run_until_complete(contact_crawler.cleanup())
                         time.sleep(2)
                         # Browser will be created automatically by context manager
-                    
+                        
                 except Exception as batch_error:
                     logger.error(f"Contact batch {i//batch_size + 1} failed: {batch_error}")
                     failed += len(batch)
@@ -549,7 +478,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     
                     # Force cleanup on error
                     try:
-                        _run_with_fresh_loop(contact_crawler.cleanup())
+                        loop.run_until_complete(contact_crawler.cleanup())
                         time.sleep(1)
                         # Browser will be created automatically by context manager
                     except:
@@ -559,7 +488,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     continue
             
             # Cleanup
-            _run_with_fresh_loop(contact_crawler.cleanup())
+            loop.run_until_complete(contact_crawler.cleanup())
             
             return {
                 'status': 'completed',
@@ -582,19 +511,17 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
                     
                     # Wait for cancellation to complete
                     if pending_tasks:
-                        _run_with_fresh_loop(
-                            asyncio.gather(*pending_tasks, return_exceptions=True)
-                        )
+                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
                 
                 # Cleanup crawler resources
-                _run_with_fresh_loop(contact_crawler.cleanup())
+                loop.run_until_complete(contact_crawler.cleanup())
                 
             except Exception as cleanup_error:
                 logger.warning(f"Cleanup error: {cleanup_error}")
             finally:
                 # Close loop properly
                 loop.close()
-            
+                
     except Exception as e:
         logger.error(f"Contact pages crawling failed: {e}")
         return {
@@ -721,7 +648,6 @@ def get_database_stats():
             'status': 'failed',
             'message': str(e)
         }
-
 
 @celery_app.task(name="final.export", bind=True)
 def export_final_csv(self):
