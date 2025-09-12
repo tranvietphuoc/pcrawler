@@ -1,7 +1,6 @@
-*.db
 .venv
 *.xlsx
 *.md
 test
 .vscode
-
+data
