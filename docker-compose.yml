@@ -55,7 +55,7 @@ services:
 
   crawler_app:
     build: .
-    container_name: app
+    container_name: cralwer_app
     command: tail -f /dev/null
     environment:
       - REDIS_URL=redis://redis:6379/0
