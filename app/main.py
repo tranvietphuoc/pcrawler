@@ -16,6 +16,66 @@ from config import CrawlerConfig
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def check_checkpoint_completeness(links, industry_name):
+    """
+    Check if checkpoint is complete based on pagination and link quality analysis
+    """
+    if not links or len(links) == 0:
+        return False, "Empty checkpoint"
+    
+    # 1. Check pagination completeness
+    page_counts = {}
+    for link in links:
+        url = link.get('url', '') if isinstance(link, dict) else str(link)
+        if 'page=' in url:
+            try:
+                # Extract page number from URL
+                import re
+                page_match = re.search(r'page=(\d+)', url)
+                if page_match:
+                    page_num = int(page_match.group(1))
+                    page_counts[page_num] = page_counts.get(page_num, 0) + 1
+            except:
+                continue
+    
+    # Check for pagination gaps
+    if page_counts:
+        max_page = max(page_counts.keys())
+        expected_pages = list(range(1, max_page + 1))
+        missing_pages = [p for p in expected_pages if p not in page_counts]
+        
+        if missing_pages:
+            return False, f"Missing pages: {missing_pages[:5]}{'...' if len(missing_pages) > 5 else ''}"
+    
+    # 2. Check link density (links per page)
+    if page_counts:
+        total_pages = len(page_counts)
+        avg_links_per_page = len(links) / total_pages
+        
+        if avg_links_per_page < 5:  # Too few links per page
+            return False, f"Low link density: {avg_links_per_page:.1f} links/page"
+    
+    # 3. Check for error patterns
+    error_links = 0
+    for link in links:
+        url = link.get('url', '') if isinstance(link, dict) else str(link)
+        if any(error in url.lower() for error in ['error', '404', 'not-found', 'timeout', 'failed']):
+            error_links += 1
+    
+    if error_links > len(links) * 0.1:  # More than 10% error links
+        return False, f"High error rate: {error_links}/{len(links)} error links"
+    
+    # 4. Check minimum link count for industry size
+    if len(links) < 20:  # Very small industry
+        return True, f"Small industry ({len(links)} links), likely complete"
+    
+    # 5. Check for reasonable link count
+    if len(links) > 1000:  # Very large industry
+        return True, f"Large industry ({len(links)} links), likely complete"
+    
+    # If all checks pass, consider complete
+    return True, f"Complete checkpoint ({len(links)} links, {len(page_counts)} pages)"
+
 async def run_phase1_links(config, base_url, batch_size):
     """Phase 1: Crawl links for all industries and save checkpoints"""
     logger.info("=" * 80)
@@ -166,16 +226,125 @@ async def run_phase1_links(config, base_url, batch_size):
 
     logger.info(f"Total links processed: {total_links_processed} companies across {len(industries)} industries")
     
-    # Retry failed industries with proper async handling
+    # Retry failed industries with completeness check
     if failed_industries:
-        logger.info(f"Retrying {len(failed_industries)} failed industries with extended timeout...")
+        logger.info(f"Checking {len(failed_industries)} failed industries for completeness...")
         retry_tasks = []
+        skipped_industries = []
         
-        # Submit all retry tasks first
+        # Check each failed industry for existing checkpoint and completeness
         for ind_id, ind_name in failed_industries:
+            # Check if checkpoint already exists
+            import re
+            import os
+            safe_industry_name = re.sub(r'[^\w\s-]', '_', ind_name)
+            safe_industry_name = re.sub(r'[-\s]+', '_', safe_industry_name)
+            safe_industry_name = safe_industry_name.strip('_')
+            
+            checkpoint_file = f"/app/data/checkpoint_{safe_industry_name}_1.json"
+            
+            if os.path.exists(checkpoint_file):
+                try:
+                    with open(checkpoint_file, 'r') as f:
+                        existing_links = json.load(f)
+                    
+                    if existing_links and len(existing_links) > 0:
+                        # COMPLETENESS CHECK: Analyze pagination and link quality
+                        is_complete, completeness_reason = check_checkpoint_completeness(existing_links, ind_name)
+                        
+                        if is_complete:
+                            logger.info(f"Industry '{ind_name}' appears complete ({len(existing_links)} links) - {completeness_reason} - SKIPPING retry")
+                            skipped_industries.append((ind_id, ind_name, checkpoint_file, existing_links))
+                            continue
+                        else:
+                            logger.info(f"Industry '{ind_name}' incomplete: {completeness_reason} - will retry")
+                    else:
+                        logger.info(f"Industry '{ind_name}' has empty checkpoint - will retry")
+                except Exception as e:
+                    logger.warning(f"Industry '{ind_name}' checkpoint corrupted: {e} - will retry")
+            else:
+                logger.info(f"Industry '{ind_name}' has no checkpoint - will retry")
+            
+            # Submit retry task only if no valid complete checkpoint exists
             logger.info(f"Submitting retry task for industry '{ind_name}'...")
             retry_task = task_fetch_industry_links.delay(base_url, ind_id, ind_name, 2)
             retry_tasks.append((retry_task, ind_id, ind_name))
+        
+        # Process skipped industries (complete checkpoints)
+        if skipped_industries:
+            logger.info(f"Processing {len(skipped_industries)} industries with complete checkpoints...")
+            for ind_id, ind_name, checkpoint_file, existing_links in skipped_industries:
+                try:
+                    # DEDUPLICATION: Remove duplicates from existing checkpoint
+                    seen_urls = set()
+                    deduplicated_links = []
+                    duplicate_count = 0
+                    
+                    for link in existing_links:
+                        url = link.get('url', '') if isinstance(link, dict) else str(link)
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            deduplicated_links.append(link)
+                        else:
+                            duplicate_count += 1
+                    
+                    if duplicate_count > 0:
+                        logger.info(f"Existing checkpoint deduplication: '{ind_name}' -> {len(deduplicated_links)} unique links, {duplicate_count} duplicates removed")
+                        existing_links = deduplicated_links
+                    
+                    # DEDUPLICATION: Check which URLs already exist in database
+                    from app.database.db_manager import DatabaseManager
+                    db_manager = DatabaseManager()
+                    
+                    # Extract URLs for batch checking
+                    urls = []
+                    for link in existing_links:
+                        if isinstance(link, dict):
+                            url = link.get('url', '')
+                        else:
+                            url = str(link)
+                        if url and url not in ("N/A", ""):
+                            if not url.startswith(("http://", "https://")):
+                                url = "https://" + url
+                            urls.append(url)
+                    
+                    # Batch check existing URLs
+                    existing_urls = set()
+                    if urls:
+                        url_exists_map = db_manager.check_urls_exist_batch(urls)
+                        existing_urls = {url for url, exists in url_exists_map.items() if exists}
+                    
+                    # Filter out existing URLs
+                    new_links = []
+                    skipped_count = 0
+                    for link in existing_links:
+                        if isinstance(link, dict):
+                            url = link.get('url', '')
+                        else:
+                            url = str(link)
+                        
+                        if url and url not in ("N/A", ""):
+                            if not url.startswith(("http://", "https://")):
+                                url = "https://" + url
+                            if url in existing_urls:
+                                skipped_count += 1
+                                continue
+                        new_links.append(link)
+                    
+                    logger.info(f"Existing checkpoint deduplication: '{ind_name}' -> {len(new_links)} new links, {skipped_count} skipped")
+                    
+                    # Submit detail tasks only for new links
+                    if new_links:
+                        for i in range(0, len(new_links), batch_size):
+                            batch = new_links[i:i+batch_size]
+                            task = task_crawl_detail_pages.delay(batch, batch_size)
+                            detail_tasks.append(task)
+                    
+                    total_links_processed += len(new_links)
+                    industry_link_counts[ind_name] = len(new_links)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process existing checkpoint for industry '{ind_name}': {e}")
         
         # Wait a bit for tasks to be picked up by workers
         import time
@@ -375,7 +544,7 @@ async def run(config_name: str = "default", base_url: str = None, start_phase: i
     base_url = base_url or config.website_config["base_url"]
     batch_size = config.processing_config["batch_size"]
     
-    logger.info(f"🚀 Starting crawler from Phase {start_phase}")
+    logger.info(f"Starting crawler from Phase {start_phase}")
     
     # Initialize variables
     failed_industries: List[tuple] = []

@@ -2,7 +2,9 @@ import re
 import json
 import asyncio
 from typing import List, Dict, Any
-from crawl4ai import AsyncWebCrawler, LLMExtractionStrategy
+from crawl4ai import AsyncWebCrawler
+from crawl4ai.deep_crawling import BestFirstCrawlingStrategy
+from crawl4ai.deep_crawling.scorers import KeywordRelevanceScorer
 from app.crawler.async_context_manager import get_context_manager
 from app.database.db_manager import DatabaseManager
 from config import CrawlerConfig
@@ -26,27 +28,33 @@ class EmailExtractor:
         ]
         self.invalid_email = [r"noreply@", r"no-reply@", r"example\.com", r"@\d+\.\d+"]
 
-        # Load Crawl4ai queries từ config
+        # Load Crawl4ai config từ config
         crawl4ai_config = self.config.crawl4ai_config
-        self.crawl4ai_queries = {
+        
+        # Email-related keywords for scoring từ config
+        self.email_keywords = crawl4ai_config.get('email_keywords', {
             'website': [
-                crawl4ai_config.get('website_query', "Extract all email addresses from this page"),
-                "Find contact email addresses",
-                "Get email addresses for contact information",
-                "Extract email addresses from contact section"
+                "contact", "email", "mail", "lien he", "lienhe", "about", "gioi thieu",
+                "info", "support", "help", "reach", "get in touch", "connect"
             ],
             'facebook': [
-                crawl4ai_config.get('facebook_query', "Extract email addresses from this Facebook page"),
-                "Find contact email addresses on this Facebook page",
-                "Get email addresses from Facebook contact information"
+                "about", "contact", "email", "mail", "info", "business", "company",
+                "lien he", "lienhe", "thong tin", "thongtin"
             ],
             'google': [
-                "Extract email addresses from search results",
-                "Find email addresses in search results"
+                "contact", "email", "mail", "about", "info", "business"
             ]
+        })
+        
+        # Deep crawling strategy configuration từ config
+        self.crawling_config = {
+            'max_depth': crawl4ai_config.get('max_depth', 2),
+            'max_pages': crawl4ai_config.get('max_pages', 25),
+            'include_external': crawl4ai_config.get('include_external', False),
+            'scorer_weight': crawl4ai_config.get('scorer_weight', 0.7)
         }
         
-        logger.info(f"Loaded Crawl4ai queries from config: {list(self.crawl4ai_queries.keys())}")
+        logger.info(f"Loaded email keywords for scoring: {list(self.email_keywords.keys())}")
     
     def _find_emails_regex(self, text: str) -> List[str]:
         """Tìm emails từ text sử dụng regex patterns (fallback)"""
@@ -63,58 +71,92 @@ class EmailExtractor:
                 return False
         return True
 
-    async def extract_emails_with_crawl4ai_query(self, html_content: str, url_type: str) -> List[str]:
-        """Extract emails using Crawl4ai query approach từ HTML content"""
+    async def extract_emails_with_best_first_crawling(self, html_content: str, url_type: str) -> List[str]:
+        """Extract emails using BestFirstCrawlingStrategy với async_context_manager từ HTML content"""
         try:
-            # Get appropriate queries for URL type
-            queries = self.crawl4ai_queries.get(url_type, self.crawl4ai_queries['website'])
+            # Get appropriate keywords for URL type
+            keywords = self.email_keywords.get(url_type, self.email_keywords['website'])
+            
+            # Create a scorer for email-related content
+            scorer = KeywordRelevanceScorer(
+                keywords=keywords,
+                weight=self.crawling_config['scorer_weight']
+            )
+            
+            # Configure the BestFirstCrawlingStrategy
+            strategy = BestFirstCrawlingStrategy(
+                max_depth=self.crawling_config['max_depth'],
+                include_external=self.crawling_config['include_external'],
+                url_scorer=scorer,
+                max_pages=self.crawling_config['max_pages']
+            )
             
             # Use Async Context Manager for browser management
             user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             viewport = {'width': 1920, 'height': 1080}
             
             async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent, viewport) as crawler:
-                # Use crawler.arun() with deep query strategy
+                # Use crawler.arun() with BestFirstCrawlingStrategy và raw HTML content
                 result = await crawler.arun(
-                    url="data:text/html;charset=utf-8," + html_content,  # Use HTML content as data URL
-                    extraction_strategy=LLMExtractionStrategy(
-                        provider="ollama/llama2",
-                        api_token="ollama",
-                        instruction=queries[0]  # Deep query instruction
-                    ),
+                    url="raw:" + html_content,  # Use raw HTML content từ database
+                    crawling_strategy=strategy,
+                    word_count_threshold=1,
+                    bypass_cache=False,
                     wait_for="domcontentloaded",
-                    timeout=30000
+                    delay_before_return_html=0.1
                 )
                 
-                # Parse extracted content
-                extracted_text = result.extracted_content or ""
+                # Collect all extracted content from crawled pages
+                all_emails = []
                 
-                # Extract emails từ extracted text using regex (fallback)
-                emails = self._find_emails_regex(extracted_text)
+                # Extract emails from main page
+                if result and result.extracted_content:
+                    emails = self._find_emails_regex(result.extracted_content)
+                    all_emails.extend(emails)
                 
-                # Filter valid emails
-                valid_emails = [email for email in emails if self._valid_email(email)]
+                # Extract emails from crawled pages
+                if hasattr(result, 'crawled_pages') and result.crawled_pages:
+                    for page in result.crawled_pages:
+                        if page.get('extracted_content'):
+                            emails = self._find_emails_regex(page['extracted_content'])
+                            all_emails.extend(emails)
                 
-                logger.info(f"Extracted {len(valid_emails)} emails using Crawl4ai deep query for {url_type}")
+                # Filter valid emails and deduplicate
+                valid_emails = list(set([email for email in all_emails if self._valid_email(email)]))
+                
+                logger.info(f"Extracted {len(valid_emails)} emails using BestFirstCrawlingStrategy for {url_type} (crawled {len(result.crawled_pages) if hasattr(result, 'crawled_pages') else 0} pages)")
                 return valid_emails
             
         except Exception as e:
-            logger.error(f"Failed to extract emails with crawl4ai deep query: {e}")
-            # Fallback to regex
-            emails = self._find_emails_regex(html_content)
-            return [email for email in emails if self._valid_email(email)]
+            logger.error(f"Failed to extract emails with BestFirstCrawlingStrategy: {e}")
+            # Fallback to regex on HTML content
+            try:
+                async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent, viewport) as crawler:
+                    result = await crawler.arun(
+                        url="raw:" + html_content,
+                        word_count_threshold=1,
+                        bypass_cache=False,
+                        wait_for="domcontentloaded"
+                    )
+                    if result and result.extracted_content:
+                        emails = self._find_emails_regex(result.extracted_content)
+                        return [email for email in emails if self._valid_email(email)]
+            except Exception as fallback_error:
+                logger.error(f"Fallback extraction also failed: {fallback_error}")
+            
+            return []
     
     async def extract_emails_from_html(self, html_content: str, url_type: str) -> List[str]:
-        """Extract emails từ HTML content using multiple methods"""
-        # Method 1: Crawl4ai query approach
-        crawl4ai_emails = await self.extract_emails_with_crawl4ai_query(html_content, url_type)
+        """Extract emails từ HTML content using BestFirstCrawlingStrategy"""
+        # Method 1: BestFirstCrawlingStrategy approach
+        crawling_emails = await self.extract_emails_with_best_first_crawling(html_content, url_type)
         
-        # Method 2: Regex fallback
+        # Method 2: Simple regex fallback on HTML content
         regex_emails = self._find_emails_regex(html_content)
         regex_emails = [email for email in regex_emails if self._valid_email(email)]
         
         # Combine and deduplicate
-        all_emails = list(set(crawl4ai_emails + regex_emails))
+        all_emails = list(set(crawling_emails + regex_emails))
         
         return all_emails
     
@@ -142,7 +184,7 @@ class EmailExtractor:
         
         for record in html_records:
             try:
-                # Extract emails from HTML (async)
+                # Extract emails from HTML content using BestFirstCrawlingStrategy (async)
                 emails = asyncio.run(self.extract_emails_from_html(record['html_content'], record['url_type']))
                 
                 # Store extraction results
@@ -151,7 +193,7 @@ class EmailExtractor:
                     company_name=record['company_name'],
                     extracted_emails=emails,
                     email_source=record['url_type'],
-                    extraction_method='crawl4ai_query',
+                    extraction_method='best_first_crawling',
                     confidence_score=0.9 if emails else 0.0
                 )
                 

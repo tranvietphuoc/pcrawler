@@ -39,6 +39,48 @@ xpath:
 crawl4ai:
   website_query: "Return only business emails found in Contact/About/Footer. Output exactly: valid emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
   facebook_query: "Return only business emails from Facebook About/Intro/Contact section. Output exactly: valid emails separated by semicolons (e.g., email1@x.com; email2@y.vn). Domain not like jpg, png, gif, etc."
+  
+  # BestFirstCrawlingStrategy Configuration
+  max_depth: 2                    # Maximum crawling depth
+  max_pages: 25                   # Maximum number of pages to crawl
+  include_external: false         # Include external links
+  scorer_weight: 0.7              # Weight for keyword relevance scoring
+  
+  # Email-related keywords for scoring
+  email_keywords:
+    website:
+      - "contact"
+      - "email" 
+      - "mail"
+      - "lien he"
+      - "lienhe"
+      - "about"
+      - "gioi thieu"
+      - "info"
+      - "support"
+      - "help"
+      - "reach"
+      - "get in touch"
+      - "connect"
+    facebook:
+      - "about"
+      - "contact"
+      - "email"
+      - "mail"
+      - "info"
+      - "business"
+      - "company"
+      - "lien he"
+      - "lienhe"
+      - "thong tin"
+      - "thongtin"
+    google:
+      - "contact"
+      - "email"
+      - "mail"
+      - "about"
+      - "info"
+      - "business"
 
 processing:
   # OPTIMIZED SETTINGS FOR BETTER PERFORMANCE
