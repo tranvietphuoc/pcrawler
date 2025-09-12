@@ -76,7 +76,27 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                     item['industry'] = industry_name
                     normalized.append(item)
             
-            # Lưu checkpoint (sau khi hoàn thành chuẩn hoá)
+            # DEDUPLICATION: Remove duplicate URLs before saving checkpoint
+            if normalized:
+                # Create URL set for deduplication
+                seen_urls = set()
+                deduplicated = []
+                duplicate_count = 0
+                
+                for item in normalized:
+                    url = item.get('url', '')
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        deduplicated.append(item)
+                    else:
+                        duplicate_count += 1
+                
+                if duplicate_count > 0:
+                    logger.info(f"Deduplication: {len(deduplicated)} unique links, {duplicate_count} duplicates removed")
+                
+                normalized = deduplicated
+            
+            # Lưu checkpoint (sau khi hoàn thành chuẩn hoá và deduplication)
             checkpoint_file = None
             if normalized:
                 # Sanitize tên industry để tạo tên file hợp lệ
@@ -94,7 +114,7 @@ def fetch_industry_links(self, base_url: str, industry_id: str, industry_name: s
                     import json
                     with open(checkpoint_file, 'w') as f:
                         json.dump(normalized, f, ensure_ascii=False, indent=2)
-                    logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} links)")
+                    logger.info(f"Checkpoint saved: {checkpoint_file} ({len(normalized)} unique links)")
                 except Exception as e:
                     logger.warning(f"Failed to save checkpoint: {e}")
             

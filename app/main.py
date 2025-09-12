@@ -78,6 +78,23 @@ async def run_phase1_links(config, base_url, batch_size):
                     total_links = len(links)
                     logger.info(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Loaded {total_links} links from checkpoint")
                     
+                    # DEDUPLICATION: Remove duplicates from checkpoint
+                    seen_urls = set()
+                    deduplicated_links = []
+                    duplicate_count = 0
+                    
+                    for link in links:
+                        url = link.get('url', '') if isinstance(link, dict) else str(link)
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            deduplicated_links.append(link)
+                        else:
+                            duplicate_count += 1
+                    
+                    if duplicate_count > 0:
+                        logger.info(f"[wave {wave_index} - {idx}/{len(link_tasks)}] Industry '{ind_name}' -> Deduplication: {len(deduplicated_links)} unique links, {duplicate_count} duplicates removed")
+                        links = deduplicated_links
+                    
                     # DEDUPLICATION: Check which URLs already exist in database
                     from app.database.db_manager import DatabaseManager
                     db_manager = DatabaseManager()
@@ -182,6 +199,23 @@ async def run_phase1_links(config, base_url, batch_size):
                         links = json.load(f)
                     total_links = len(links)
                     logger.info(f"Retry successful: '{ind_name}' -> {total_links} links")
+                    
+                    # DEDUPLICATION: Remove duplicates from retry checkpoint
+                    seen_urls = set()
+                    deduplicated_links = []
+                    duplicate_count = 0
+                    
+                    for link in links:
+                        url = link.get('url', '') if isinstance(link, dict) else str(link)
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            deduplicated_links.append(link)
+                        else:
+                            duplicate_count += 1
+                    
+                    if duplicate_count > 0:
+                        logger.info(f"Retry deduplication: '{ind_name}' -> {len(deduplicated_links)} unique links, {duplicate_count} duplicates removed")
+                        links = deduplicated_links
                     
                     # DEDUPLICATION: Check which URLs already exist in database
                     from app.database.db_manager import DatabaseManager
