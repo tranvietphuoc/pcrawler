@@ -25,6 +25,10 @@ help:
 	@echo "  make run-phase5        - Run crawler starting from Phase 5"
 	@echo "  make run-force-restart - Force restart from Phase 1"
 	@echo ""
+	@echo "Scaling commands:"
+	@echo "  make scale-workers N   - Scale workers to N instances"
+	@echo "  make run-phase3-scale5 - Run Phase 3 with 5 workers"
+	@echo ""
 	@echo "Interactive mode:"
 	@echo "  make run               - Interactive phase selection"
 	@echo ""
@@ -118,3 +122,17 @@ run-phase5:
 run-force-restart:
 	@echo "Force restarting crawler from Phase 1..."
 	./run_crawler.sh --phase 1 --force-restart
+
+# Scale workers
+scale-workers:
+	@if [ -z "$(N)" ]; then \
+		echo "Usage: make scale-workers N=5"; \
+		exit 1; \
+	fi
+	@echo "Scaling workers to $(N) instances..."
+	docker-compose up -d --scale worker=$(N)
+
+# Run Phase 3 with 5 workers
+run-phase3-scale5:
+	@echo "Running Phase 3 with 5 workers..."
+	./run_crawler.sh --phase 3 --scale 5
