@@ -3,6 +3,7 @@ import json
 import asyncio
 from typing import List, Dict, Any
 from crawl4ai import AsyncWebCrawler, LLMExtractionStrategy
+from app.crawler.async_context_manager import get_context_manager
 from app.database.db_manager import DatabaseManager
 from config import CrawlerConfig
 import logging
@@ -13,6 +14,10 @@ class EmailExtractor:
     def __init__(self, config: CrawlerConfig = None):
         self.config = config or CrawlerConfig()
         self.db_manager = DatabaseManager()
+        
+        # Use Async Context Manager for browser management
+        self.context_manager = get_context_manager()
+        self.crawler_id = f"EmailExtractor_{id(self)}"
         
         # Email patterns for fallback
         self.email_patterns = [
@@ -64,34 +69,37 @@ class EmailExtractor:
             # Get appropriate queries for URL type
             queries = self.crawl4ai_queries.get(url_type, self.crawl4ai_queries['website'])
             
-            crawler = AsyncWebCrawler()
+            # Use Async Context Manager for browser management
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            viewport = {'width': 1920, 'height': 1080}
             
-            # Extract từ HTML content sử dụng Crawl4ai
-            result = await crawler.extract(
-                html_content=html_content,
-                extraction_strategy=LLMExtractionStrategy(
-                    provider="ollama/llama2",
-                    api_token="ollama",
-                    instruction=queries[0]  # Sử dụng query đầu tiên
+            async with self.context_manager.get_crawl4ai_crawler(self.crawler_id, user_agent, viewport) as crawler:
+                # Use crawler.arun() with deep query strategy
+                result = await crawler.arun(
+                    url="data:text/html;charset=utf-8," + html_content,  # Use HTML content as data URL
+                    extraction_strategy=LLMExtractionStrategy(
+                        provider="ollama/llama2",
+                        api_token="ollama",
+                        instruction=queries[0]  # Deep query instruction
+                    ),
+                    wait_for="domcontentloaded",
+                    timeout=30000
                 )
-            )
-            
-            # Parse extracted content
-            extracted_text = result.extracted_content or ""
-            
-            # Extract emails từ extracted text
-            emails = self._find_emails_regex(extracted_text)
-            
-            # Filter valid emails
-            valid_emails = [email for email in emails if self._valid_email(email)]
-            
-            logger.info(f"Extracted {len(valid_emails)} emails using Crawl4ai {url_type} query")
-            return valid_emails
-            
-            # Note: crawler.close() is handled automatically by Async Context Manager
+                
+                # Parse extracted content
+                extracted_text = result.extracted_content or ""
+                
+                # Extract emails từ extracted text using regex (fallback)
+                emails = self._find_emails_regex(extracted_text)
+                
+                # Filter valid emails
+                valid_emails = [email for email in emails if self._valid_email(email)]
+                
+                logger.info(f"Extracted {len(valid_emails)} emails using Crawl4ai deep query for {url_type}")
+                return valid_emails
             
         except Exception as e:
-            logger.error(f"Failed to extract emails with crawl4ai query: {e}")
+            logger.error(f"Failed to extract emails with crawl4ai deep query: {e}")
             # Fallback to regex
             emails = self._find_emails_regex(html_content)
             return [email for email in emails if self._valid_email(email)]

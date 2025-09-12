@@ -16,26 +16,19 @@ help:
 	@echo "  make status            - Show current status"
 	@echo "  make clean             - Clean up containers and volumes"
 	@echo ""
-	@echo "Crawler commands (with phase selection):"
-	@echo "  make run-auto          - Run crawler with auto phase detection"
-	@echo "  make run-phase1        - Run crawler starting from Phase 1"
-	@echo "  make run-phase2        - Run crawler starting from Phase 2"
-	@echo "  make run-phase3        - Run crawler starting from Phase 3"
-	@echo "  make run-phase4        - Run crawler starting from Phase 4"
-	@echo "  make run-phase5        - Run crawler starting from Phase 5"
-	@echo "  make run-force-restart - Force restart from Phase 1"
+	@echo "Crawler commands:"
+	@echo "  make run               - Interactive phase and scale selection (RECOMMENDED)"
 	@echo ""
-	@echo "Scaling commands:"
-	@echo "  make scale-workers N   - Scale workers to N instances"
-	@echo "  make run-phase3-scale5 - Run Phase 3 with 5 workers"
-	@echo ""
-	@echo "Interactive mode:"
-	@echo "  make run               - Interactive phase selection"
+	@echo "Database cleanup commands:"
+	@echo "  make cleanup-stats     - Show database stats only"
+	@echo "  make cleanup-dedup     - Deduplicate detail_html_storage"
+	@echo "  make cleanup-contact   - Cleanup contact_html_storage"
+	@echo "  make cleanup-all       - Full database cleanup (dedup + contact cleanup)"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make run-auto          # Auto-detect and start from appropriate phase"
-	@echo "  make run-phase2        # Start from Phase 2 (detail crawling)"
-	@echo "  make run               # Interactive mode to choose phase"
+	@echo "  make run               # Interactive mode to choose phase and scale"
+	@echo "  make cleanup-stats     # Show current database stats"
+	@echo "  make cleanup-all       # Full database cleanup"
 
 # Build Docker images
 build:
@@ -86,53 +79,21 @@ clean:
 # Interactive mode
 run:
 	@echo "Starting interactive crawler..."
-	./run_crawler.sh --logs
+	./run_crawler.sh
 
-# Auto phase detection
-run-auto:
-	@echo "Running crawler with auto phase detection..."
-	./run_crawler.sh --phase auto
+# Database cleanup commands
+cleanup-stats:
+	@echo "Showing database stats..."
+	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --stats-only
 
-# Phase 1: Links
-run-phase1:
-	@echo "Running crawler starting from Phase 1 (Links)..."
-	./run_crawler.sh --phase 1
+cleanup-dedup:
+	@echo "Deduplicating detail_html_storage..."
+	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --dedup-detail --no-cleanup-contact
 
-# Phase 2: Details
-run-phase2:
-	@echo "Running crawler starting from Phase 2 (Details)..."
-	./run_crawler.sh --phase 2
+cleanup-contact:
+	@echo "Cleaning up contact_html_storage..."
+	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --no-dedup-detail --cleanup-contact
 
-# Phase 3: Contacts
-run-phase3:
-	@echo "Running crawler starting from Phase 3 (Contacts)..."
-	./run_crawler.sh --phase 3
-
-# Phase 4: Extraction
-run-phase4:
-	@echo "Running crawler starting from Phase 4 (Extraction)..."
-	./run_crawler.sh --phase 4
-
-# Phase 5: Export
-run-phase5:
-	@echo "Running crawler starting from Phase 5 (Export)..."
-	./run_crawler.sh --phase 5
-
-# Force restart
-run-force-restart:
-	@echo "Force restarting crawler from Phase 1..."
-	./run_crawler.sh --phase 1 --force-restart
-
-# Scale workers
-scale-workers:
-	@if [ -z "$(N)" ]; then \
-		echo "Usage: make scale-workers N=5"; \
-		exit 1; \
-	fi
-	@echo "Scaling workers to $(N) instances..."
-	docker-compose up -d --scale worker=$(N)
-
-# Run Phase 3 with 5 workers
-run-phase3-scale5:
-	@echo "Running Phase 3 with 5 workers..."
-	./run_crawler.sh --phase 3 --scale 5
+cleanup-all:
+	@echo "Running full database cleanup..."
+	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py

@@ -93,9 +93,9 @@ run_crawler() {
     # Build command using docker-compose run with real-time output
     local cmd=""
     if [ "$force_restart" = "true" ]; then
-        cmd="docker-compose run --rm --no-deps crawler_app python -m app.main crawl --phase 1 --force-restart --config $config"
+        cmd="docker-compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase 1 --force-restart --config $config"
     else
-        cmd="docker-compose run --rm --no-deps crawler_app python -m app.main crawl --phase $phase --config $config"
+        cmd="docker-compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase $phase --config $config"
     fi
     
     print_info "Executing: $cmd"
@@ -105,12 +105,33 @@ run_crawler() {
     print_info "Starting crawler with real-time logs..."
     echo ""
     
-    # Run the command and show output in real-time
-    eval $cmd
+    # Run the command in background and show logs real-time
+    print_info "Running crawler command in background..."
+    eval $cmd &
+    local crawler_pid=$!
     
-    # After command completes, show recent logs
+    # Show real-time logs while crawler is running
+    print_info "Showing real-time logs from running containers..."
+    docker-compose logs -f &
+    local logs_pid=$!
+    
+    # Wait for crawler to complete
+    wait $crawler_pid
+    local crawler_exit_code=$?
+    
+    # Stop logs display
+    kill $logs_pid 2>/dev/null
+    
+    # Show final status
+    if [ $crawler_exit_code -eq 0 ]; then
+        print_info "Crawler completed successfully!"
+    else
+        print_error "Crawler failed with exit code: $crawler_exit_code"
+    fi
+    
+    # Show recent logs
     echo ""
-    print_info "Crawler completed. Recent logs:"
+    print_info "Recent logs:"
     docker-compose logs --tail=50
 }
 
@@ -226,6 +247,13 @@ main() {
             q|Q) print_info "Exiting..."; exit 0 ;;
             *) print_error "Invalid choice: $choice"; exit 1 ;;
         esac
+        
+        # Ask for scale
+        echo ""
+        read -p "Enter number of workers (default: 1): " scale_input
+        if [ -n "$scale_input" ] && [ "$scale_input" -gt 0 ]; then
+            scale="$scale_input"
+        fi
     fi
     
     # Validate phase
