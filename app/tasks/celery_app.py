@@ -23,6 +23,11 @@ celery_app.conf.worker_disable_rate_limits = True  # Disable rate limits
 celery_app.conf.task_reject_on_worker_lost = True  # Reject tasks if worker lost
 celery_app.conf.task_acks_on_failure_or_timeout = True  # Ack failed/timeout tasks
 
+# (2.5) HEARTBEAT CONFIGURATION - REDUCE WARNINGS
+celery_app.conf.worker_heartbeat_interval = 30  # Increase heartbeat interval to 30s
+celery_app.conf.worker_direct = True  # Direct worker communication
+celery_app.conf.worker_send_task_events = False  # Disable task events to reduce overhead
+
 # (3) RESULT BACKEND CONFIGURATION - ENABLE FOR PROPER RESULT HANDLING
 celery_app.conf.result_expires = 3600  # Results expire after 1 hour
 celery_app.conf.result_persistent = True  # Enable persistence

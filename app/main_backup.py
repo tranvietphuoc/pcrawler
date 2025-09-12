@@ -16,31 +16,40 @@ from config import CrawlerConfig
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-async def run_phase1_links(config, base_url, batch_size):
-    """Phase 1: Crawl links for all industries and save checkpoints"""
-    logger.info("=" * 80)
-    logger.info("PHASE 1: Crawling links for all industries...")
-    logger.info("=" * 80)
+async def run(config_name: str = "default", base_url: str = None, start_phase: int = 1):
+    # Load config
+    config = CrawlerConfig(config_name)
+    base_url = base_url or config.website_config["base_url"]
+    batch_size = config.processing_config["batch_size"]
     
-    # Get industries
-    list_c = ListCrawler(config=config)
-    industries = await list_c.get_industries(base_url)
-    logger.info(f"Found {len(industries)} industries")
+    logger.info(f"🚀 Starting crawler from Phase {start_phase}")
     
+    # Initialize variables
     failed_industries: List[tuple] = []
     industry_link_counts: Dict[str, int] = {}
     detail_tasks = []
     total_links_processed = 0
     
-    # Submit link fetching tasks in small waves to avoid overload
-    wave_size = config.processing_config.get("industry_wave_size", 4)
+    # PHASE 1: Crawl links for all industries and save checkpoints
+    if start_phase <= 1:
+        logger.info("=" * 80)
+        logger.info("PHASE 1: Crawling links for all industries...")
+        logger.info("=" * 80)
+        
+        # Get industries
+        list_c = ListCrawler(config=config)
+        industries = await list_c.get_industries(base_url)
+        logger.info(f"Found {len(industries)} industries")
+    
+        # Submit link fetching tasks in small waves to avoid overload
+        wave_size = config.processing_config.get("industry_wave_size", 4)
 
-    def iter_waves(items, size):
-        for i in range(0, len(items), size):
-            yield items[i:i+size]
+        def iter_waves(items, size):
+            for i in range(0, len(items), size):
+                yield items[i:i+size]
 
-    wave_index = 0
-    for wave in iter_waves(industries, wave_size):
+        wave_index = 0
+        for wave in iter_waves(industries, wave_size):
         wave_index += 1
         link_tasks = []
         logger.info(f"Submitting wave {wave_index} with {len(wave)} industries...")
@@ -50,7 +59,7 @@ async def run_phase1_links(config, base_url, batch_size):
             link_tasks.append((task, ind_id, ind_name))
         
         # Collect results for current wave and submit detail crawling tasks
-        logger.info(f"Processing wave {wave_index} results...")
+        logger.info(f"Waiting for {len(link_tasks)} industry link fetching tasks in wave {wave_index} to complete...")
         
         # Process tasks in parallel with proper error handling
         completed_tasks = 0
@@ -243,137 +252,84 @@ async def run_phase1_links(config, base_url, batch_size):
         
         logger.info(f"Retry phase completed: {completed_retries}/{len(retry_tasks)} tasks processed")
     
-    return {
-        'failed_industries': failed_industries,
-        'industry_link_counts': industry_link_counts,
-        'detail_tasks': detail_tasks,
-        'total_links_processed': total_links_processed
-    }
-
-async def run_phase2_details(detail_tasks):
-    """Phase 2: Wait for all detail crawling tasks to complete"""
-    logger.info("=" * 80)
-    logger.info("PHASE 2: Waiting for detail crawling tasks to complete...")
-    logger.info("=" * 80)
+    # PHASE 2: Wait for all detail crawling tasks to complete
+    if detail_tasks:
+        logger.info(f"PHASE 2: Waiting for {len(detail_tasks)} detail crawling tasks to complete...")
+        completed = 0
+        failed = 0
+        for i, t in enumerate(detail_tasks):
+            try:
+                result = t.get(timeout=1800)  # 30 minutes timeout per batch
+                completed += 1
+                if i % 10 == 0:  # Log progress every 10 batches
+                    logger.info(f"Detail batches progress: {completed}/{len(detail_tasks)} completed, {failed} failed")
+            except Exception as e:
+                failed += 1
+                logger.warning(f"Detail batch {i+1} failed: {e}")
+        
+        logger.info(f"DETAIL CRAWLING COMPLETED: {completed} successful, {failed} failed out of {len(detail_tasks)} batches")
+    else:
+        logger.warning("No detail crawling tasks to process - all industries failed in Phase 1")
     
-    if not detail_tasks:
-        logger.info("No detail tasks to process")
-        return
-    
-    logger.info(f"Waiting for {len(detail_tasks)} detail crawling tasks to complete...")
-    completed_details = 0
-    failed_details = 0
-    
-    for i, task in enumerate(detail_tasks, 1):
-        try:
-            result = task.get(timeout=3600)  # 1 hour timeout per batch
-            completed_details += 1
-            if i % 10 == 0 or i == len(detail_tasks):
-                logger.info(f"Detail crawling progress: {i}/{len(detail_tasks)} tasks completed")
-        except Exception as e:
-            failed_details += 1
-            logger.error(f"Detail crawling task {i} failed: {e}")
-    
-    logger.info(f"Detail crawling completed: {completed_details} successful, {failed_details} failed")
-
-async def run_phase3_contacts(batch_size):
-    """Phase 3: Crawl contact pages from company details"""
-    logger.info("=" * 80)
-    logger.info("PHASE 3: Crawling contact pages from company details...")
-    logger.info("=" * 80)
-    
-    # Submit contact crawling task
-    contact_task = task_crawl_contact_from_details.delay(batch_size)
-    logger.info("Contact crawling task submitted")
-    
-    # Wait for completion
+    # PHASE 3: Extract company details from DB
+    logger.info("PHASE 3: Extracting company details from stored HTML...")
     try:
-        result = contact_task.get(timeout=7200)  # 2 hours timeout
-        logger.info(f"Contact crawling completed: {result}")
-    except Exception as e:
-        logger.error(f"Contact crawling failed: {e}")
-
-async def run_phase4_extraction(batch_size):
-    """Phase 4: Extract company details and emails"""
-    logger.info("=" * 80)
-    logger.info("PHASE 4: Extracting company details and emails...")
-    logger.info("=" * 80)
-    
-    # Submit extraction tasks
-    details_task = task_extract_company_details.delay(batch_size)
-    emails_task = task_extract_emails_from_contact.delay(batch_size)
-    
-    logger.info("Extraction tasks submitted")
-    
-    # Wait for completion
-    try:
-        details_result = details_task.get(timeout=3600)  # 1 hour timeout
-        emails_result = emails_task.get(timeout=3600)  # 1 hour timeout
-        logger.info(f"Details extraction completed: {details_result}")
-        logger.info(f"Emails extraction completed: {emails_result}")
-    except Exception as e:
-        logger.error(f"Extraction failed: {e}")
-
-async def run_phase5_export():
-    """Phase 5: Export final CSV"""
-    logger.info("=" * 80)
-    logger.info("PHASE 5: Exporting final CSV...")
-    logger.info("=" * 80)
-    
-    # Submit export task
-    export_task = task_export_final_csv.delay()
-    logger.info("Export task submitted")
-    
-    # Wait for completion
-    try:
-        result = export_task.get(timeout=1800)  # 30 minutes timeout
+        r = task_extract_company_details.delay(batch_size)
+        result = r.get(timeout=3600)
         if result:
-            logger.info(f"Export completed: {result}")
+            logger.info(f"Company details extraction completed: {result.get('processed', 0)} companies processed")
         else:
-            logger.warning("Export task returned no result")
+            logger.warning("Company details extraction returned None result")
     except Exception as e:
-        logger.error(f"Export failed: {e}")
+        logger.warning(f"Company details extraction encountered issues: {e}")
 
-async def run(config_name: str = "default", base_url: str = None, start_phase: int = 1):
-    """Main crawler function with phase selection"""
-    # Load config
-    config = CrawlerConfig(config_name)
-    base_url = base_url or config.website_config["base_url"]
-    batch_size = config.processing_config["batch_size"]
-    
-    logger.info(f"🚀 Starting crawler from Phase {start_phase}")
-    
-    # Initialize variables
-    failed_industries: List[tuple] = []
-    industry_link_counts: Dict[str, int] = {}
-    detail_tasks = []
-    total_links_processed = 0
-    
-    # Execute phases based on start_phase
-    if start_phase <= 1:
-        phase1_result = await run_phase1_links(config, base_url, batch_size)
-        failed_industries = phase1_result['failed_industries']
-        industry_link_counts = phase1_result['industry_link_counts']
-        detail_tasks = phase1_result['detail_tasks']
-        total_links_processed = phase1_result['total_links_processed']
-    
-    if start_phase <= 2:
-        await run_phase2_details(detail_tasks)
-    
-    if start_phase <= 3:
-        await run_phase3_contacts(batch_size)
-    
-    if start_phase <= 4:
-        await run_phase4_extraction(batch_size)
-    
-    if start_phase <= 5:
-        await run_phase5_export()
-    
+    # PHASE 4: Crawl contact pages (website/facebook, deep)
+    logger.info("PHASE 4: Crawling contact pages (website/facebook) from company_details...")
+    try:
+        r = task_crawl_contact_from_details.delay(batch_size)
+        result = r.get(timeout=3600)
+        if result:
+            logger.info(f"Contact crawling completed: {result.get('processed', 0)} companies processed")
+        else:
+            logger.warning("Contact crawling returned None result")
+    except Exception as e:
+        logger.warning(f"Contact crawling encountered issues: {e}")
+
+    # PHASE 5: Extract emails from contact HTML via Crawl4AI
+    logger.info("PHASE 5: Extracting emails from contact HTML via Crawl4AI...")
+    try:
+        r = task_extract_emails_from_contact.delay(batch_size)
+        result = r.get(timeout=3600)
+        if result:
+            logger.info(f"Email extraction completed: {result.get('processed', 0)} companies processed")
+        else:
+            logger.warning("Email extraction returned None result")
+    except Exception as e:
+        logger.warning(f"Email extraction encountered issues: {e}")
+
+    # PHASE 6: Export final CSV (join via DataFrame)
+    logger.info("PHASE 6: Exporting final CSV (joining phases 1-2-4)...")
+    try:
+        r = task_export_final_csv.delay()
+        res = r.get(timeout=1800)
+        if res:
+            logger.info(f"Final export completed: {res.get('rows', 0)} rows -> {res.get('output')}")
+        else:
+            logger.warning("Final export returned None result")
+    except Exception as e:
+        logger.error(f"Failed exporting final CSV: {e}")
+        return {"status": "error", "message": str(e)}
+
+    # Cleanup ListCrawler resources
+    try:
+        await list_c.cleanup()
+    except Exception as e:
+        logger.warning(f"Error during ListCrawler cleanup: {e}")
+
     # Final summary
     logger.info("=" * 80)
-    logger.info("CRAWLING SUMMARY")
-    logger.info("=" * 80)
-    logger.info(f"Total industries processed: {len(industry_link_counts)}")
+    logger.info("CRAWLING SUMMARY:")
+    logger.info(f"Total industries processed: {len(industries)}")
     logger.info(f"Total links processed: {total_links_processed}")
     logger.info(f"Failed industries: {len(failed_industries)}")
     logger.info(f"Detail tasks submitted: {len(detail_tasks)}")
@@ -386,7 +342,7 @@ async def run(config_name: str = "default", base_url: str = None, start_phase: i
     return {
         "status": "success", 
         "message": "Crawling completed successfully",
-        "total_industries": len(industry_link_counts),
+        "total_industries": len(industries),
         "total_links": total_links_processed,
         "failed_industries": len(failed_industries),
         "detail_tasks": len(detail_tasks)
@@ -408,7 +364,7 @@ def detect_completed_phases():
     checkpoint_files = glob.glob("data/checkpoint_*.json")
     if checkpoint_files:
         completed_phases['phase1_links'] = True
-        logger.info(f"Phase 1 (Links) completed: {len(checkpoint_files)} checkpoint files found")
+        logger.info(f"✅ Phase 1 (Links) completed: {len(checkpoint_files)} checkpoint files found")
     
     # Check Phase 2: Detail HTML (database has detail_html_storage records)
     try:
@@ -420,7 +376,7 @@ def detect_completed_phases():
             detail_count = cursor.fetchone()[0]
             if detail_count > 0:
                 completed_phases['phase2_details'] = True
-                logger.info(f"Phase 2 (Detail HTML) completed: {detail_count} records found")
+                logger.info(f"✅ Phase 2 (Detail HTML) completed: {detail_count} records found")
     except Exception as e:
         logger.warning(f"Could not check Phase 2 status: {e}")
     
@@ -432,7 +388,7 @@ def detect_completed_phases():
             contact_count = cursor.fetchone()[0]
             if contact_count > 0:
                 completed_phases['phase3_contacts'] = True
-                logger.info(f"Phase 3 (Contact HTML) completed: {contact_count} records found")
+                logger.info(f"✅ Phase 3 (Contact HTML) completed: {contact_count} records found")
     except Exception as e:
         logger.warning(f"Could not check Phase 3 status: {e}")
     
@@ -444,14 +400,14 @@ def detect_completed_phases():
             details_count = cursor.fetchone()[0]
             if details_count > 0:
                 completed_phases['phase4_extraction'] = True
-                logger.info(f"Phase 4 (Company Details) completed: {details_count} records found")
+                logger.info(f"✅ Phase 4 (Company Details) completed: {details_count} records found")
     except Exception as e:
         logger.warning(f"Could not check Phase 4 status: {e}")
     
     # Check Phase 5: Export (CSV file exists)
     if os.path.exists("data/company_contacts.csv"):
         completed_phases['phase5_export'] = True
-        logger.info("Phase 5 (Export) completed: CSV file found")
+        logger.info("✅ Phase 5 (Export) completed: CSV file found")
     
     return completed_phases
 
@@ -471,7 +427,7 @@ def main():
         # Determine starting phase
         if args.force_restart:
             start_phase = 1
-            logger.info("Force restart: Starting from Phase 1")
+            logger.info("🔄 Force restart: Starting from Phase 1")
         elif args.phase == "auto":
             # Auto-detect starting phase
             if not completed_phases['phase1_links']:
@@ -485,12 +441,12 @@ def main():
             elif not completed_phases['phase5_export']:
                 start_phase = 5
             else:
-                logger.info("All phases completed! Nothing to do.")
+                logger.info("✅ All phases completed! Nothing to do.")
                 return
-            logger.info(f"Auto-detected: Starting from Phase {start_phase}")
+            logger.info(f"🎯 Auto-detected: Starting from Phase {start_phase}")
         else:
             start_phase = int(args.phase)
-            logger.info(f"Manual selection: Starting from Phase {start_phase}")
+            logger.info(f"🎯 Manual selection: Starting from Phase {start_phase}")
         
         # Run with phase selection
         asyncio.run(run(args.config, start_phase=start_phase))

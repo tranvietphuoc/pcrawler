@@ -55,8 +55,8 @@ services:
 
   crawler_app:
     build: .
-    container_name: crawler_app
-    command: python -m app.main crawl
+    container_name: app
+    command: tail -f /dev/null
     environment:
       - REDIS_URL=redis://redis:6379/0
       - PYTHONPATH=/app

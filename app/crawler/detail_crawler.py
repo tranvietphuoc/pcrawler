@@ -51,15 +51,56 @@ class DetailCrawler(BaseCrawler):
                 return False
     
     async def crawl_batch(self, companies: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Crawl detail pages cho một batch companies"""
+        """Crawl batch of companies with deduplication - skip already crawled URLs"""
+        if not companies:
+            return {'total': 0, 'successful': 0, 'failed': 0, 'skipped': 0}
+        
+        # Extract URLs for batch checking
+        urls = []
+        for company in companies:
+            url = company.get('url', '')
+            if url and url not in ("N/A", ""):
+                if not url.startswith(("http://", "https://")):
+                    url = "https://" + url
+                urls.append(url)
+        
+        # Batch check which URLs already exist
+        existing_urls = set()
+        if urls:
+            url_exists_map = self.db_manager.check_urls_exist_batch(urls)
+            existing_urls = {url for url, exists in url_exists_map.items() if exists}
+        
+        logger.info(f"Batch deduplication: {len(existing_urls)}/{len(urls)} URLs already exist, will skip")
+        
+        # Filter out existing URLs
+        new_companies = []
+        skipped_count = 0
+        for company in companies:
+            url = company.get('url', '')
+            if url and url not in ("N/A", ""):
+                if not url.startswith(("http://", "https://")):
+                    url = "https://" + url
+                if url in existing_urls:
+                    skipped_count += 1
+                    logger.debug(f"Skipping already crawled URL: {url}")
+                    continue
+            new_companies.append(company)
+        
+        logger.info(f"After deduplication: {len(new_companies)} new companies to crawl, {skipped_count} skipped")
+        
+        if not new_companies:
+            return {'total': len(companies), 'successful': 0, 'failed': 0, 'skipped': skipped_count}
+        
+        # Crawl only new companies (after deduplication)
         results = {
             'total': len(companies),
             'successful': 0,
             'failed': 0,
+            'skipped': skipped_count,
             'details': []
         }
         
-        for company in companies:
+        for company in new_companies:
             # Support both dict and plain URL string
             if isinstance(company, str):
                 company_url = company
