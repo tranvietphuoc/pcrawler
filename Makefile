@@ -53,6 +53,11 @@ logs:
 	@echo "Showing logs from all services..."
 	docker-compose logs -f
 
+# Show logs using run_crawler script
+logs-script:
+	@echo "Showing logs using run_crawler script..."
+	./run_crawler.sh --logs
+
 # Show status
 status:
 	@echo "Current status:"
@@ -77,7 +82,7 @@ clean:
 # Interactive mode
 run:
 	@echo "Starting interactive crawler..."
-	./run_crawler.sh
+	./run_crawler.sh --logs
 
 # Auto phase detection
 run-auto:

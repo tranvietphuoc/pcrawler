@@ -39,6 +39,8 @@ show_help() {
     echo "  --phase PHASE     Start from specific phase (1,2,3,4,5,auto)"
     echo "  --force-restart   Force restart from Phase 1"
     echo "  --config CONFIG   Config name (default: 1900comvn)"
+    echo "  --scale N         Scale workers to N instances (default: 1)"
+    echo "  --logs           Show logs from running containers"
     echo "  --help           Show this help message"
     echo ""
     echo "Phases:"
@@ -54,6 +56,8 @@ show_help() {
     echo "  $0 --phase 2                       # Start from Phase 2 (detail crawling)"
     echo "  $0 --phase 1 --force-restart       # Force restart from Phase 1"
     echo "  $0 --phase auto --config myconfig  # Use custom config with auto phase"
+    echo "  $0 --phase 3 --scale 5             # Start Phase 3 with 5 workers"
+    echo "  $0 --logs                          # Show logs from running containers"
 }
 
 # Function to validate phase
@@ -76,27 +80,38 @@ run_crawler() {
     local phase=$1
     local force_restart=$2
     local config=$3
+    local scale=$4
     
     print_info "Starting PCrawler with phase selection..."
     print_info "Phase: $phase"
     print_info "Config: $config"
+    print_info "Workers: $scale"
     if [ "$force_restart" = "true" ]; then
         print_warning "Force restart enabled - will start from Phase 1"
     fi
     
-    # Build command using docker-compose run
+    # Build command using docker-compose run with real-time output
     local cmd=""
     if [ "$force_restart" = "true" ]; then
-        cmd="docker-compose run --rm crawler_app python -m app.main crawl --phase 1 --force-restart --config $config"
+        cmd="docker-compose run --rm --no-deps crawler_app python -m app.main crawl --phase 1 --force-restart --config $config"
     else
-        cmd="docker-compose run --rm crawler_app python -m app.main crawl --phase $phase --config $config"
+        cmd="docker-compose run --rm --no-deps crawler_app python -m app.main crawl --phase $phase --config $config"
     fi
     
     print_info "Executing: $cmd"
     echo ""
     
-    # Execute command
+    # Execute command with real-time output and show logs
+    print_info "Starting crawler with real-time logs..."
+    echo ""
+    
+    # Run the command and show output in real-time
     eval $cmd
+    
+    # After command completes, show recent logs
+    echo ""
+    print_info "Crawler completed. Recent logs:"
+    docker-compose logs --tail=50
 }
 
 # Function to show current status
@@ -128,7 +143,9 @@ main() {
     local phase=""
     local force_restart="false"
     local config="1900comvn"
+    local scale="1"
     local show_help_flag="false"
+    local show_logs_flag="false"
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -145,6 +162,14 @@ main() {
                 config="$2"
                 shift 2
                 ;;
+            --scale)
+                scale="$2"
+                shift 2
+                ;;
+            --logs)
+                show_logs_flag="true"
+                shift
+                ;;
             --help|-h)
                 show_help_flag="true"
                 shift
@@ -160,6 +185,13 @@ main() {
     # Show help if requested
     if [ "$show_help_flag" = "true" ]; then
         show_help
+        exit 0
+    fi
+    
+    # Show logs if requested
+    if [ "$show_logs_flag" = "true" ]; then
+        print_info "Showing logs from running containers..."
+        docker-compose logs -f
         exit 0
     fi
     
@@ -201,8 +233,16 @@ main() {
         exit 1
     fi
     
+    # Scale workers if needed
+    if [ "$scale" != "1" ]; then
+        print_info "Scaling workers to $scale instances..."
+        docker-compose up -d --scale worker=$scale
+        print_info "Waiting 5 seconds for workers to start..."
+        sleep 5
+    fi
+    
     # Run crawler
-    run_crawler "$phase" "$force_restart" "$config"
+    run_crawler "$phase" "$force_restart" "$config" "$scale"
 }
 
 # Run main function
