@@ -186,10 +186,10 @@ class DatabaseManager:
                 cursor.execute("""
                     INSERT INTO company_details 
                     (detail_html_id, company_name, company_url, address, phone, website, facebook, 
-                     linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     linkedin, tiktok, youtube, instagram, created_year, revenue, scale)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (detail_html_id, company_name, company_url, address, phone, website, facebook, 
-                      linkedin, tiktok, youtube, instagram, description, created_year, revenue, scale))
+                      linkedin, tiktok, youtube, instagram, created_year, revenue, scale))
                 conn.commit()
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e):
