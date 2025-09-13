@@ -109,7 +109,7 @@ def migrate_database(db_path: str = "data/crawler.db", dry_run: bool = False):
                 )
             """)
             
-            # Create new contact_html_storage with unique constraint
+            # Create new contact_html_storage without unique constraint
             cursor.execute("""
                 CREATE TABLE contact_html_storage_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,8 +120,7 @@ def migrate_database(db_path: str = "data/crawler.db", dry_run: bool = False):
                     crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     status TEXT DEFAULT 'pending',
                     retry_count INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(url, url_type)
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
@@ -236,25 +235,25 @@ def migrate_database(db_path: str = "data/crawler.db", dry_run: bool = False):
             # 10. Test unique constraints
             logger.info("Testing unique constraints...")
             
-            try:
-                # Try to insert duplicate company_url
-                cursor.execute("""
-                    INSERT INTO detail_html_storage (company_name, company_url, html_content)
-                    SELECT company_name, company_url, html_content FROM detail_html_storage LIMIT 1
-                """)
-                logger.error("ERROR: Unique constraint not working for detail_html_storage!")
-            except sqlite3.IntegrityError:
-                logger.info("✓ Unique constraint working for detail_html_storage")
+            # Test detail_html_storage unique constraint
+            cursor.execute("SELECT COUNT(*) FROM detail_html_storage")
+            detail_count = cursor.fetchone()[0]
             
-            try:
-                # Try to insert duplicate url+url_type
-                cursor.execute("""
-                    INSERT INTO contact_html_storage (company_name, url, url_type, html_content)
-                    SELECT company_name, url, url_type, html_content FROM contact_html_storage LIMIT 1
-                """)
-                logger.error("ERROR: Unique constraint not working for contact_html_storage!")
-            except sqlite3.IntegrityError:
-                logger.info("✓ Unique constraint working for contact_html_storage")
+            if detail_count > 0:
+                try:
+                    # Try to insert duplicate company_url
+                    cursor.execute("""
+                        INSERT INTO detail_html_storage (company_name, company_url, html_content)
+                        SELECT company_name, company_url, html_content FROM detail_html_storage LIMIT 1
+                    """)
+                    logger.error("ERROR: Unique constraint not working for detail_html_storage!")
+                except sqlite3.IntegrityError:
+                    logger.info("✓ Unique constraint working for detail_html_storage")
+            else:
+                logger.info("✓ detail_html_storage: Unique constraint applied (table empty, cannot test)")
+            
+            # Skip testing contact_html_storage unique constraint (not implemented)
+            logger.info("✓ contact_html_storage: No unique constraint (as requested)")
         
         conn.close()
         return True

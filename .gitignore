@@ -8,3 +8,5 @@ __pycache__
 *.xlsx
 *.json
 main_old.py
+*.db
+*.corrupted
