@@ -1,7 +1,6 @@
 import asyncio
 import random
 from typing import List, Dict, Any
-from crawl4ai import AsyncWebCrawler
 from app.database.db_manager import DatabaseManager
 from config import CrawlerConfig
 from .base_crawler import BaseCrawler
@@ -131,4 +130,3 @@ class DetailCrawler(BaseCrawler):
             await asyncio.sleep(random.uniform(1, 3))
         
         return results
-    

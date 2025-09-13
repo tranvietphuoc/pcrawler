@@ -1,7 +1,7 @@
 # PCrawler - Professional Web Crawler with Phase Selection
 # Makefile for easy Docker Compose management
 
-.PHONY: help build up down logs status clean run-auto run-phase1 run-phase2 run-phase3 run-phase4 run-phase5 run-force-restart
+.PHONY: help build up down logs status clean run cleanup-stats cleanup-all
 
 # Default target
 help:
@@ -21,14 +21,12 @@ help:
 	@echo ""
 	@echo "Database cleanup commands:"
 	@echo "  make cleanup-stats     - Show database stats only"
-	@echo "  make cleanup-dedup     - Deduplicate detail_html_storage"
-	@echo "  make cleanup-contact   - Cleanup contact_html_storage"
-	@echo "  make cleanup-all       - Full database cleanup (dedup + contact cleanup)"
+	@echo "  make cleanup-all       - Full database cleanup (dedup + all tables cleanup)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make run               # Interactive mode to choose phase and scale"
 	@echo "  make cleanup-stats     # Show current database stats"
-	@echo "  make cleanup-all       # Full database cleanup"
+	@echo "  make cleanup-all       # Full database cleanup (dedup + all tables)"
 
 # Build Docker images
 build:
@@ -85,14 +83,6 @@ run:
 cleanup-stats:
 	@echo "Showing database stats..."
 	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --stats-only
-
-cleanup-dedup:
-	@echo "Deduplicating detail_html_storage..."
-	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --dedup-detail --no-cleanup-contact
-
-cleanup-contact:
-	@echo "Cleaning up contact_html_storage..."
-	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --no-dedup-detail --cleanup-contact
 
 cleanup-all:
 	@echo "Running full database cleanup..."

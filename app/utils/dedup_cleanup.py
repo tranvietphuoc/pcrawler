@@ -131,6 +131,90 @@ class DatabaseCleanup:
             logger.error(f"Error during contact_html_storage cleanup: {e}")
             raise
     
+    def cleanup_email_extraction(self) -> Dict[str, int]:
+        """
+        Xóa tất cả records trong email_extraction
+        """
+        logger.info("Starting cleanup of email_extraction...")
+        
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Đếm số records trước khi xóa
+                cursor.execute("SELECT COUNT(*) FROM email_extraction")
+                total_records = cursor.fetchone()[0]
+                
+                logger.info(f"Found {total_records} records in email_extraction")
+                
+                if total_records > 0:
+                    # Xóa tất cả records
+                    cursor.execute("DELETE FROM email_extraction")
+                    conn.commit()
+                    
+                    logger.info(f"Deleted {total_records} records from email_extraction")
+                else:
+                    logger.info("No records to delete in email_extraction")
+                
+                result = {
+                    'total_deleted': total_records
+                }
+                
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error during email_extraction cleanup: {e}")
+            raise
+    
+    def cleanup_company_details(self) -> Dict[str, int]:
+        """
+        Xóa tất cả records trong company_details
+        """
+        logger.info("Starting cleanup of company_details...")
+        
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Đếm số records trước khi xóa
+                cursor.execute("SELECT COUNT(*) FROM company_details")
+                total_records = cursor.fetchone()[0]
+                
+                logger.info(f"Found {total_records} records in company_details")
+                
+                if total_records > 0:
+                    # Xóa tất cả records
+                    cursor.execute("DELETE FROM company_details")
+                    conn.commit()
+                    
+                    logger.info(f"Deleted {total_records} records from company_details")
+                else:
+                    logger.info("No records to delete in company_details")
+                
+                result = {
+                    'total_deleted': total_records
+                }
+                
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error during company_details cleanup: {e}")
+            raise
+    
+    def cleanup_all_tables(self) -> Dict[str, int]:
+        """Delete all records from all three tables and return counts"""
+        logger.info("Cleaning up all tables...")
+        
+        results = {}
+        
+        # Cleanup in order to respect foreign key constraints
+        results['contact_html_storage'] = self.cleanup_contact_html_storage()['total_deleted']
+        results['email_extraction'] = self.cleanup_email_extraction()['total_deleted']
+        results['company_details'] = self.cleanup_company_details()['total_deleted']
+        
+        logger.info(f"Cleaned up all tables: {results}")
+        return results
+    
     def get_database_stats(self) -> Dict[str, int]:
         """
         Lấy thống kê database
@@ -165,7 +249,8 @@ class DatabaseCleanup:
             logger.error(f"Error getting database stats: {e}")
             raise
     
-    def run_cleanup(self, dedup_detail: bool = True, cleanup_contact: bool = True) -> Dict[str, Any]:
+    def run_cleanup(self, dedup_detail: bool = True, cleanup_contact: bool = True, 
+                   cleanup_emails: bool = False, cleanup_companies: bool = False) -> Dict[str, Any]:
         """
         Chạy cleanup process
         """
@@ -194,6 +279,20 @@ class DatabaseCleanup:
             logger.info("CLEANING UP CONTACT_HTML_STORAGE")
             logger.info("=" * 50)
             results['contact_cleanup'] = self.cleanup_contact_html_storage()
+        
+        # Cleanup email_extraction
+        if cleanup_emails:
+            logger.info("\n" + "=" * 50)
+            logger.info("CLEANING UP EMAIL_EXTRACTION")
+            logger.info("=" * 50)
+            results['email_cleanup'] = self.cleanup_email_extraction()
+        
+        # Cleanup company_details
+        if cleanup_companies:
+            logger.info("\n" + "=" * 50)
+            logger.info("CLEANING UP COMPANY_DETAILS")
+            logger.info("=" * 50)
+            results['company_cleanup'] = self.cleanup_company_details()
         
         # Lấy stats sau khi cleanup
         logger.info("\n" + "=" * 50)
@@ -228,6 +327,8 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Database cleanup and deduplication script')
+    
+    # Original cleanup options
     parser.add_argument('--dedup-detail', action='store_true', default=True,
                        help='Deduplicate detail_html_storage (default: True)')
     parser.add_argument('--no-dedup-detail', action='store_true',
@@ -236,6 +337,12 @@ def main():
                        help='Cleanup contact_html_storage (default: True)')
     parser.add_argument('--no-cleanup-contact', action='store_true',
                        help='Skip cleanup of contact_html_storage')
+    parser.add_argument('--cleanup-emails', action='store_true',
+                       help='Cleanup email_extraction table')
+    parser.add_argument('--cleanup-companies', action='store_true',
+                       help='Cleanup company_details table')
+    parser.add_argument('--cleanup-all-tables', action='store_true',
+                       help='Cleanup all tables (contact, emails, companies)')
     parser.add_argument('--stats-only', action='store_true',
                        help='Show database stats only, no cleanup')
     
@@ -244,10 +351,14 @@ def main():
     # Determine actions
     dedup_detail = args.dedup_detail and not args.no_dedup_detail
     cleanup_contact = args.cleanup_contact and not args.no_cleanup_contact
+    cleanup_emails = args.cleanup_emails
+    cleanup_companies = args.cleanup_companies
     
     if args.stats_only:
         dedup_detail = False
         cleanup_contact = False
+        cleanup_emails = False
+        cleanup_companies = False
     
     try:
         cleanup = DatabaseCleanup()
@@ -258,10 +369,20 @@ def main():
             logger.info("Current database stats:")
             for table, count in stats.items():
                 logger.info(f"  {table}: {count} records")
+        
+        elif args.cleanup_all_tables:
+            # Cleanup all tables
+            logger.info("Cleaning up all tables...")
+            results = cleanup.cleanup_all_tables()
+            logger.info(f"✅ Cleaned up all tables: {results}")
+        
         else:
+            # Original cleanup operations - cleanup-all now includes all tables
             results = cleanup.run_cleanup(
                 dedup_detail=dedup_detail,
-                cleanup_contact=cleanup_contact
+                cleanup_contact=True,  # Always cleanup contact
+                cleanup_emails=True,   # Always cleanup emails
+                cleanup_companies=True # Always cleanup companies
             )
             
             logger.info("Cleanup completed successfully!")
