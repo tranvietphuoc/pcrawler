@@ -437,7 +437,7 @@ def crawl_contact_pages_from_details(self, batch_size: int = 50):
             
             if not company_details:
                 return {
-                    'status': 'completed',
+                    'status': 'no_pending',
                     'message': 'No company details found for contact crawling',
                     'processed': 0,
                     'successful': 0,

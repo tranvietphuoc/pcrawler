@@ -14,7 +14,7 @@ class ContactCrawler(BaseCrawler):
         super().__init__(config)
         self.db_manager = DatabaseManager()
         self.max_requests_per_browser = 100  # Override for ContactCrawler - balance memory vs stability
-        
+
     async def crawl_contact_page(self, url: str, company_name: str, url_type: str = 'website') -> bool:
         """Crawl contact page và lưu HTML vào database (contact_html_storage)"""
         if not url or url in ("N/A", ""):

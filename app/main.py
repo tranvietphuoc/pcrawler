@@ -479,30 +479,13 @@ async def run_phase2_details(detail_tasks):
     
     logger.info(f"Detail crawling completed: {completed_details} successful, {failed_details} failed")
 
-async def run_phase3_contacts(batch_size):
-    """Phase 3: Crawl contact pages from company details"""
+async def run_phase3_extract_details(batch_size):
+    """Phase 3: Extract company details from detail_html_storage"""
     logger.info("=" * 80)
-    logger.info("PHASE 3: Crawling contact pages from company details...")
-    logger.info("=" * 80)
-    
-    # Submit contact crawling task
-    contact_task = task_crawl_contact_from_details.delay(batch_size)
-    logger.info("Contact crawling task submitted")
-    
-    # Wait for completion
-    try:
-        result = contact_task.get(timeout=7200)  # 2 hours timeout
-        logger.info(f"Contact crawling completed: {result}")
-    except Exception as e:
-        logger.error(f"Contact crawling failed: {e}")
-
-async def run_phase4_extraction(batch_size):
-    """Phase 4: Extract company details and emails"""
-    logger.info("=" * 80)
-    logger.info("PHASE 4: Extracting company details and emails...")
+    logger.info("PHASE 3: Extracting company details from detail_html_storage...")
     logger.info("=" * 80)
     
-    # Check pending records
+    # Check pending records in detail_html_storage
     from app.database.db_manager import DatabaseManager
     db_manager = DatabaseManager()
     
@@ -511,13 +494,12 @@ async def run_phase4_extraction(batch_size):
         cursor.execute("SELECT COUNT(*) FROM detail_html_storage WHERE status = 'pending'")
         pending_details = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM contact_html_storage WHERE status = 'pending'")
-        pending_contacts = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM company_details")
+        existing_companies = cursor.fetchone()[0]
     
     logger.info(f"Pending detail records: {pending_details}")
-    logger.info(f"Pending contact records: {pending_contacts}")
+    logger.info(f"Existing company details: {existing_companies}")
     
-    # Process all pending detail records
     if pending_details > 0:
         logger.info(f"Processing {pending_details} pending detail records in batches of {batch_size}")
         total_processed = 0
@@ -525,20 +507,20 @@ async def run_phase4_extraction(batch_size):
         total_failed = 0
         
         while True:
-            # Submit extraction task
+            # Submit details extraction task
             details_task = task_extract_company_details.delay(batch_size)
             logger.info(f"Details extraction task submitted (batch {total_processed//batch_size + 1})")
             
             try:
-                details_result = details_task.get(timeout=3600)  # 1 hour timeout
-                total_processed += details_result.get('processed', 0)
-                total_successful += details_result.get('successful', 0)
-                total_failed += details_result.get('failed', 0)
+                result = details_task.get(timeout=3600)  # 1 hour timeout
+                total_processed += result.get('processed', 0)
+                total_successful += result.get('successful', 0)
+                total_failed += result.get('failed', 0)
                 
-                logger.info(f"Batch completed: {details_result}")
+                logger.info(f"Batch completed: {result}")
                 
                 # Check if no more pending records
-                if details_result.get('status') == 'no_pending':
+                if result.get('status') == 'no_pending':
                     logger.info("No more pending detail records")
                     break
                     
@@ -547,8 +529,83 @@ async def run_phase4_extraction(batch_size):
                 break
         
         logger.info(f"Details extraction summary: {total_processed} processed, {total_successful} successful, {total_failed} failed")
+    else:
+        logger.info("No pending detail records found for extraction")
+
+async def run_phase4_contacts(batch_size):
+    """Phase 4: Crawl contact pages from company_details"""
+    logger.info("=" * 80)
+    logger.info("PHASE 4: Crawling contact pages from company_details...")
+    logger.info("=" * 80)
     
-    # Process all pending contact records
+    # Check company details records
+    from app.database.db_manager import DatabaseManager
+    db_manager = DatabaseManager()
+    
+    with db_manager.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM company_details WHERE (website IS NOT NULL AND website != '') OR (facebook IS NOT NULL AND facebook != '')")
+        companies_with_contacts = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM contact_html_storage")
+        existing_contacts = cursor.fetchone()[0]
+    
+    logger.info(f"Companies with contact info: {companies_with_contacts}")
+    logger.info(f"Existing contact records: {existing_contacts}")
+    
+    if companies_with_contacts > 0:
+        logger.info(f"Processing {companies_with_contacts} companies with contact info in batches of {batch_size}")
+        total_processed = 0
+        total_successful = 0
+        total_failed = 0
+        
+        while True:
+            # Submit contact crawling task
+            contact_task = task_crawl_contact_from_details.delay(batch_size)
+            logger.info(f"Contact crawling task submitted (batch {total_processed//batch_size + 1})")
+            
+            try:
+                result = contact_task.get(timeout=7200)  # 2 hours timeout
+                total_processed += result.get('processed', 0)
+                total_successful += result.get('successful', 0)
+                total_failed += result.get('failed', 0)
+                
+                logger.info(f"Batch completed: {result}")
+                
+                # Check if no more records to process
+                if result.get('status') == 'no_pending':
+                    logger.info("No more companies to process for contact crawling")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Contact crawling failed: {e}")
+                break
+        
+        logger.info(f"Contact crawling summary: {total_processed} processed, {total_successful} successful, {total_failed} failed")
+    else:
+        logger.info("No companies with contact info found for crawling")
+
+async def run_phase5_extract_emails(batch_size):
+    """Phase 5: Extract emails from contact_html_storage"""
+    logger.info("=" * 80)
+    logger.info("PHASE 5: Extracting emails from contact_html_storage...")
+    logger.info("=" * 80)
+    
+    # Check pending contact records
+    from app.database.db_manager import DatabaseManager
+    db_manager = DatabaseManager()
+    
+    with db_manager.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM contact_html_storage WHERE status = 'pending'")
+        pending_contacts = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM email_extraction")
+        existing_emails = cursor.fetchone()[0]
+    
+    logger.info(f"Pending contact records: {pending_contacts}")
+    logger.info(f"Existing email extractions: {existing_emails}")
+    
     if pending_contacts > 0:
         logger.info(f"Processing {pending_contacts} pending contact records in batches of {batch_size}")
         total_processed = 0
@@ -556,20 +613,20 @@ async def run_phase4_extraction(batch_size):
         total_failed = 0
         
         while True:
-            # Submit extraction task
+            # Submit emails extraction task
             emails_task = task_extract_emails_from_contact.delay(batch_size)
             logger.info(f"Emails extraction task submitted (batch {total_processed//batch_size + 1})")
             
             try:
-                emails_result = emails_task.get(timeout=3600)  # 1 hour timeout
-                total_processed += emails_result.get('processed', 0)
-                total_successful += emails_result.get('successful', 0)
-                total_failed += emails_result.get('failed', 0)
+                result = emails_task.get(timeout=3600)  # 1 hour timeout
+                total_processed += result.get('processed', 0)
+                total_successful += result.get('successful', 0)
+                total_failed += result.get('failed', 0)
                 
-                logger.info(f"Batch completed: {emails_result}")
+                logger.info(f"Batch completed: {result}")
                 
                 # Check if no more pending records
-                if emails_result.get('status') == 'no_pending':
+                if result.get('status') == 'no_pending':
                     logger.info("No more pending contact records")
                     break
                     
@@ -578,13 +635,13 @@ async def run_phase4_extraction(batch_size):
                 break
         
         logger.info(f"Emails extraction summary: {total_processed} processed, {total_successful} successful, {total_failed} failed")
-    
-    logger.info("Phase 4 extraction completed")
+    else:
+        logger.info("No pending contact records found for email extraction")
 
-async def run_phase5_export():
-    """Phase 5: Export final CSV"""
+async def run_phase6_export():
+    """Phase 6: Export final CSV"""
     logger.info("=" * 80)
-    logger.info("PHASE 5: Exporting final CSV...")
+    logger.info("PHASE 6: Exporting final CSV...")
     logger.info("=" * 80)
     
     # Submit export task
@@ -628,13 +685,16 @@ async def run(config_name: str = "default", base_url: str = None, start_phase: i
         await run_phase2_details(detail_tasks)
     
     if start_phase <= 3:
-        await run_phase3_contacts(batch_size)
+        await run_phase3_extract_details(batch_size)
     
     if start_phase <= 4:
-        await run_phase4_extraction(batch_size)
+        await run_phase4_contacts(batch_size)
     
     if start_phase <= 5:
-        await run_phase5_export()
+        await run_phase5_extract_emails(batch_size)
+    
+    if start_phase <= 6:
+        await run_phase6_export()
     
     # Final summary
     logger.info("=" * 80)
