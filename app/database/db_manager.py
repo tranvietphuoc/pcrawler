@@ -95,6 +95,16 @@ class DatabaseManager:
                 record_id = cursor.lastrowid
                 conn.commit()
                 return record_id
+        except sqlite3.IntegrityError as e:
+            if "UNIQUE constraint failed" in str(e):
+                logger.info(f"URL already exists, skipping: {company_url}")
+                # Return existing record ID
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM detail_html_storage WHERE company_url = ?", (company_url,))
+                result = cursor.fetchone()
+                return result[0] if result else None
+            else:
+                raise
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e):
                 logger.warning(f"Database locked, retrying store_detail_html for {company_name}")
@@ -115,6 +125,16 @@ class DatabaseManager:
                 record_id = cursor.lastrowid
                 conn.commit()
                 return record_id
+        except sqlite3.IntegrityError as e:
+            if "UNIQUE constraint failed" in str(e):
+                logger.info(f"URL already exists, skipping: {url} ({url_type})")
+                # Return existing record ID
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM contact_html_storage WHERE url = ? AND url_type = ?", (url, url_type))
+                result = cursor.fetchone()
+                return result[0] if result else None
+            else:
+                raise
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e):
                 logger.warning(f"Database locked, retrying store_contact_html for {company_name}")

@@ -502,20 +502,84 @@ async def run_phase4_extraction(batch_size):
     logger.info("PHASE 4: Extracting company details and emails...")
     logger.info("=" * 80)
     
-    # Submit extraction tasks
-    details_task = task_extract_company_details.delay(batch_size)
-    emails_task = task_extract_emails_from_contact.delay(batch_size)
+    # Check pending records
+    from app.database.db_manager import DatabaseManager
+    db_manager = DatabaseManager()
     
-    logger.info("Extraction tasks submitted")
+    with db_manager.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM detail_html_storage WHERE status = 'pending'")
+        pending_details = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM contact_html_storage WHERE status = 'pending'")
+        pending_contacts = cursor.fetchone()[0]
     
-    # Wait for completion
-    try:
-        details_result = details_task.get(timeout=3600)  # 1 hour timeout
-        emails_result = emails_task.get(timeout=3600)  # 1 hour timeout
-        logger.info(f"Details extraction completed: {details_result}")
-        logger.info(f"Emails extraction completed: {emails_result}")
-    except Exception as e:
-        logger.error(f"Extraction failed: {e}")
+    logger.info(f"Pending detail records: {pending_details}")
+    logger.info(f"Pending contact records: {pending_contacts}")
+    
+    # Process all pending detail records
+    if pending_details > 0:
+        logger.info(f"Processing {pending_details} pending detail records in batches of {batch_size}")
+        total_processed = 0
+        total_successful = 0
+        total_failed = 0
+        
+        while True:
+            # Submit extraction task
+            details_task = task_extract_company_details.delay(batch_size)
+            logger.info(f"Details extraction task submitted (batch {total_processed//batch_size + 1})")
+            
+            try:
+                details_result = details_task.get(timeout=3600)  # 1 hour timeout
+                total_processed += details_result.get('processed', 0)
+                total_successful += details_result.get('successful', 0)
+                total_failed += details_result.get('failed', 0)
+                
+                logger.info(f"Batch completed: {details_result}")
+                
+                # Check if no more pending records
+                if details_result.get('status') == 'no_pending':
+                    logger.info("No more pending detail records")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Details extraction failed: {e}")
+                break
+        
+        logger.info(f"Details extraction summary: {total_processed} processed, {total_successful} successful, {total_failed} failed")
+    
+    # Process all pending contact records
+    if pending_contacts > 0:
+        logger.info(f"Processing {pending_contacts} pending contact records in batches of {batch_size}")
+        total_processed = 0
+        total_successful = 0
+        total_failed = 0
+        
+        while True:
+            # Submit extraction task
+            emails_task = task_extract_emails_from_contact.delay(batch_size)
+            logger.info(f"Emails extraction task submitted (batch {total_processed//batch_size + 1})")
+            
+            try:
+                emails_result = emails_task.get(timeout=3600)  # 1 hour timeout
+                total_processed += emails_result.get('processed', 0)
+                total_successful += emails_result.get('successful', 0)
+                total_failed += emails_result.get('failed', 0)
+                
+                logger.info(f"Batch completed: {emails_result}")
+                
+                # Check if no more pending records
+                if emails_result.get('status') == 'no_pending':
+                    logger.info("No more pending contact records")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Emails extraction failed: {e}")
+                break
+        
+        logger.info(f"Emails extraction summary: {total_processed} processed, {total_successful} successful, {total_failed} failed")
+    
+    logger.info("Phase 4 extraction completed")
 
 async def run_phase5_export():
     """Phase 5: Export final CSV"""

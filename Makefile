@@ -19,14 +19,18 @@ help:
 	@echo "Crawler commands:"
 	@echo "  make run               - Interactive phase and scale selection (RECOMMENDED)"
 	@echo ""
-	@echo "Database cleanup commands:"
+	@echo "Database commands:"
 	@echo "  make cleanup-stats     - Show database stats only"
 	@echo "  make cleanup-all       - Full database cleanup (dedup + all tables cleanup)"
+	@echo ""
+	@echo "Migration:"
+	@echo "  ./migrate_server.sh    - Interactive database migration script"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make run               # Interactive mode to choose phase and scale"
 	@echo "  make cleanup-stats     # Show current database stats"
 	@echo "  make cleanup-all       # Full database cleanup (dedup + all tables)"
+	@echo "  ./migrate_server.sh    # Run database migration"
 
 # Build Docker images
 build:
@@ -87,3 +91,4 @@ cleanup-stats:
 cleanup-all:
 	@echo "Running full database cleanup..."
 	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py
+

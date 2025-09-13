@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS detail_html_storage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_name TEXT NOT NULL,
-    company_url TEXT NOT NULL,
+    company_url TEXT NOT NULL UNIQUE,
     industry TEXT,
     html_content TEXT NOT NULL,
     crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -65,10 +65,12 @@ CREATE TABLE IF NOT EXISTS email_extraction (
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_detail_html_status ON detail_html_storage(status);
 CREATE INDEX IF NOT EXISTS idx_detail_html_company ON detail_html_storage(company_name);
+CREATE INDEX IF NOT EXISTS idx_detail_html_url ON detail_html_storage(company_url);
 CREATE INDEX IF NOT EXISTS idx_company_details_name ON company_details(company_name);
 CREATE INDEX IF NOT EXISTS idx_contact_html_status ON contact_html_storage(status);
 CREATE INDEX IF NOT EXISTS idx_contact_html_company ON contact_html_storage(company_name);
 CREATE INDEX IF NOT EXISTS idx_contact_html_type ON contact_html_storage(url_type);
+CREATE INDEX IF NOT EXISTS idx_contact_html_url ON contact_html_storage(url);
 CREATE INDEX IF NOT EXISTS idx_email_extraction_company ON email_extraction(company_name);
 CREATE INDEX IF NOT EXISTS idx_email_extraction_html_id ON email_extraction(contact_html_id);
 -- (index final_results removed)
