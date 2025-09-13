@@ -710,20 +710,35 @@ def export_final_csv(self):
             # explode emails if JSON array to one row per email
             def split_emails(val):
                 try:
-                    lst = pd.json.loads(val) if isinstance(val, str) and val.startswith('[') else None
+                    if isinstance(val, str):
+                        if val.startswith('[') and val.endswith(']'):
+                            # JSON array format
+                            lst = pd.json.loads(val)
+                        elif val and val != '[]' and val != 'N/A':
+                            # Single email string
+                            lst = [val]
+                        else:
+                            # Empty or invalid
+                            lst = []
+                    elif isinstance(val, list):
+                        # Already a list
+                        lst = val
+                    else:
+                        # Other types
+                        lst = []
                 except Exception:
-                    lst = None
-                if lst is None:
-                    return [val] if val and val != '[]' else []
+                    lst = []
                 return lst
-            # Prepare rows
+            # Prepare rows - Split emails and duplicate rows (max 5 emails per company)
             rows = []
             for _, r in df.iterrows():
                 emails = split_emails(r['extracted_email'])
                 if not emails:
+                    # No emails found - create single row with N/A
                     rows.append({**r.to_dict(), 'extracted_email': 'N/A'})
                 else:
-                    for em in emails[:5]:
+                    # Multiple emails found - create separate row for each email (max 5)
+                    for em in emails[:5]:  # Limit to maximum 5 emails per company
                         rows.append({**r.to_dict(), 'extracted_email': em})
             out_df = pd.DataFrame(rows)
             # Ensure columns order

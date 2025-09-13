@@ -775,10 +775,20 @@ def detect_completed_phases():
     except Exception as e:
         logger.warning(f"Could not check Phase 4 status: {e}")
     
-    # Check Phase 5: Export (CSV file exists)
+    # Check Phase 5: Export (CSV file exists and has data)
     if os.path.exists("data/company_contacts.csv"):
-        completed_phases['phase5_export'] = True
-        logger.info("Phase 5 (Export) completed: CSV file found")
+        try:
+            import pandas as pd
+            df = pd.read_csv("data/company_contacts.csv")
+            if len(df) > 0:
+                completed_phases['phase5_export'] = True
+                logger.info(f"Phase 5 (Export) completed: CSV file found with {len(df)} records")
+            else:
+                logger.info("Phase 5 (Export): CSV file exists but is empty")
+        except Exception as e:
+            logger.info(f"Phase 5 (Export): CSV file exists but could not read: {e}")
+    else:
+        logger.info("Phase 5 (Export): CSV file not found")
     
     return completed_phases
 
