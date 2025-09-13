@@ -4,7 +4,7 @@
 
 **🚀 Khuyến nghị: Sử dụng Makefile để dễ dàng quản lý và chạy ứng dụng**
 
-## 📋 Quick Start
+## 📋 Bắt Đầu Nhanh
 
 ### Sử dụng Makefile (Khuyến nghị)
 
@@ -40,7 +40,7 @@ make cleanup-all       # Full database cleanup (dedup + all tables cleanup)
 ./migrate_server.sh    # Interactive database migration script
 ```
 
-## 🏗️ Architecture Overview
+## 🏗️ Tổng Quan Kiến Trúc
 
 ### 6-Phase Crawling Pipeline
 
@@ -152,31 +152,31 @@ erDiagram
     contact_html_storage ||--o{ email_extraction : "extracts emails from"
 ```
 
-## 🚀 Performance Analysis
+## 🚀 Phân Tích Hiệu Năng
 
 ### Phase Performance Metrics
 
-| Phase       | Description                | Input                 | Output                 | Time (20k records) | Parallelization |
-| ----------- | -------------------------- | --------------------- | ---------------------- | ------------------ | --------------- |
-| **Phase 1** | Link Collection            | 88 Industries         | Checkpoint Files       | ~20-30 min         | ✅ High         |
-| **Phase 2** | Detail HTML Crawling       | Company URLs          | HTML Storage           | ~3 hours           | ✅ High         |
-| **Phase 3** | Company Details Extraction | HTML Content          | Company Data           | ~1.2 hours         | ✅ High         |
-| **Phase 4** | Contact Pages Crawling     | Website/Facebook URLs | Contact HTML           | ~4.9 hours         | ✅ High         |
-| **Phase 5** | Email Extraction           | Contact HTML          | Email Data             | ~1.8 hours         | ✅ High         |
-| **Phase 6** | Final Export               | All Tables            | CSV File (1 row/email) | ~1 minute          | ❌ Single       |
+| Phase       | Mô tả                       | Input                 | Output                 | Thời gian (20k records) | Song song |
+| ----------- | --------------------------- | --------------------- | ---------------------- | ----------------------- | --------- |
+| **Phase 1** | Thu thập Links              | 88 Industries         | Checkpoint Files       | ~20-30 phút             | ✅ Cao    |
+| **Phase 2** | Crawl HTML Chi tiết         | Company URLs          | HTML Storage           | ~3 giờ                  | ✅ Cao    |
+| **Phase 3** | Trích xuất Chi tiết Công ty | HTML Content          | Company Data           | ~1.2 giờ                | ✅ Cao    |
+| **Phase 4** | Crawl Trang Liên hệ         | Website/Facebook URLs | Contact HTML           | ~4.9 giờ                | ✅ Cao    |
+| **Phase 5** | Trích xuất Email            | Contact HTML          | Email Data             | ~1.8 giờ                | ✅ Cao    |
+| **Phase 6** | Xuất CSV Cuối cùng          | All Tables            | CSV File (1 row/email) | ~1 phút                 | ❌ Đơn    |
 
 ### Phase 6 Export Logic
 
-**Email Array Processing**:
+**Xử lý Email Array**:
 
-- **Input**: `extracted_emails` JSON array from `email_extraction` table
+- **Input**: `extracted_emails` JSON array từ bảng `email_extraction`
 - **Process**:
   1. Parse JSON array: `["email1@company.com", "email2@company.com"]`
-  2. Split into individual emails
-  3. Create separate row for each email (duplicate company data)
-  4. Limit to maximum 5 emails per company
-- **Output**: CSV with one row per email
-- **Example**:
+  2. Tách thành các email riêng lẻ
+  3. Tạo dòng riêng cho mỗi email (duplicate company data)
+  4. Giới hạn tối đa 5 emails per company
+- **Output**: CSV với một dòng per email
+- **Ví dụ**:
   ```
   Company A | email1@company.com | (all other company data)
   Company A | email2@company.com | (all other company data)
@@ -185,32 +185,32 @@ erDiagram
 
 ### Performance Improvements
 
-| Component           | Metric              | Before | After        | Improvement     |
-| ------------------- | ------------------- | ------ | ------------ | --------------- |
-| **Circuit Breaker** | State Check (1000x) | ~2ms   | 0.30ms       | **6.7x faster** |
-| **Health Monitor**  | Health Check (10x)  | ~5ms   | 0.01ms       | **500x faster** |
-| **Memory Usage**    | Circuit Breaker     | ~2MB   | 0.05MB       | **40x less**    |
-| **CPU Overhead**    | Lock Operations     | High   | Minimal      | **3x less**     |
-| **Event Loop**      | Creation            | ~10ms  | 0ms (reused) | **∞ faster**    |
+| Component           | Metric              | Trước | Sau          | Cải thiện          |
+| ------------------- | ------------------- | ----- | ------------ | ------------------ |
+| **Circuit Breaker** | State Check (1000x) | ~2ms  | 0.30ms       | **6.7x nhanh hơn** |
+| **Health Monitor**  | Health Check (10x)  | ~5ms  | 0.01ms       | **500x nhanh hơn** |
+| **Memory Usage**    | Circuit Breaker     | ~2MB  | 0.05MB       | **40x ít hơn**     |
+| **CPU Overhead**    | Lock Operations     | High  | Minimal      | **3x ít hơn**      |
+| **Event Loop**      | Creation            | ~10ms | 0ms (reused) | **∞ nhanh hơn**    |
 
 ### Scalability Analysis
 
-| Workers       | Memory Usage | CPU Usage | Throughput | Risk Level   |
-| ------------- | ------------ | --------- | ---------- | ------------ |
-| **1 Worker**  | ~2GB         | Low       | 1x         | 🟢 Safe      |
-| **2 Workers** | ~4GB         | Medium    | 1.8x       | 🟡 Balanced  |
-| **3 Workers** | ~6GB         | High      | 2.5x       | 🟠 Risky     |
-| **5 Workers** | ~10GB        | Very High | 3.5x       | 🔴 High Risk |
+| Workers       | Memory Usage | CPU Usage | Throughput | Mức độ Rủi ro |
+| ------------- | ------------ | --------- | ---------- | ------------- |
+| **1 Worker**  | ~2GB         | Low       | 1x         | 🟢 An toàn    |
+| **2 Workers** | ~4GB         | Medium    | 1.8x       | 🟡 Cân bằng   |
+| **3 Workers** | ~6GB         | High      | 2.5x       | 🟠 Rủi ro     |
+| **5 Workers** | ~10GB        | Very High | 3.5x       | 🔴 Rủi ro cao |
 
-## 🛠️ Usage Examples
+## 🛠️ Ví Dụ Sử Dụng
 
-### Interactive Mode (Recommended)
+### Interactive Mode (Khuyến nghị)
 
 ```bash
-# Start interactive crawler
+# Bắt đầu crawler tương tác
 make run
 
-# Example output:
+# Ví dụ output:
 # PCrawler - Professional Web Crawler with Phase Selection
 #
 # Please select a phase to start from:
@@ -230,29 +230,29 @@ make run
 ### Command Line Mode
 
 ```bash
-# Auto-detect phase with 2 workers
+# Tự động detect phase với 2 workers
 ./run_crawler.sh --phase auto --scale 2
 
-# Start from specific phase
+# Bắt đầu từ phase cụ thể
 ./run_crawler.sh --phase 3 --scale 1
 
-# Force restart from Phase 1
+# Force restart từ Phase 1
 ./run_crawler.sh --phase 1 --force-restart
 
-# Show logs
+# Hiển thị logs
 ./run_crawler.sh --logs
 ```
 
 ### Database Management
 
 ```bash
-# Show database statistics
+# Hiển thị thống kê database
 make cleanup-stats
 
 # Full database cleanup
 make cleanup-all
 
-# Run database migration
+# Chạy database migration
 ./migrate_server.sh
 ```
 
@@ -260,9 +260,9 @@ make cleanup-all
 
 ### Available Configs
 
-- `1900comvn`: Optimized for 1900.com.vn (default)
-- `default`: Generic configuration
-- `example`: Example configuration for other websites
+- `1900comvn`: Tối ưu cho 1900.com.vn (mặc định)
+- `default`: Cấu hình chung
+- `example`: Cấu hình ví dụ cho website khác
 
 ### Key Configuration Parameters
 
@@ -285,30 +285,30 @@ crawl4ai_config:
 ### Real-time Monitoring
 
 ```bash
-# Show live logs
+# Hiển thị logs trực tiếp
 make logs
 
-# Show specific service logs
+# Hiển thị logs của service cụ thể
 docker-compose logs -f worker
 docker-compose logs -f redis
 ```
 
 ### Health Monitoring
 
-The system includes comprehensive health monitoring:
+Hệ thống bao gồm health monitoring toàn diện:
 
-- **Memory Usage**: Automatic monitoring with 3GB limit per worker
+- **Memory Usage**: Tự động monitoring với giới hạn 3GB per worker
 - **CPU Usage**: Real-time CPU monitoring
-- **Circuit Breakers**: Automatic failure detection and recovery
-- **Error Tracking**: Detailed error logging and categorization
+- **Circuit Breakers**: Tự động phát hiện lỗi và recovery
+- **Error Tracking**: Logging lỗi chi tiết và phân loại
 
 ### Performance Metrics
 
 ```bash
-# Check system status
+# Kiểm tra trạng thái hệ thống
 make status
 
-# Example output:
+# Ví dụ output:
 # Current status:
 # Container Name    Status    Ports
 # pcrawler-redis    Up        6379/tcp
@@ -323,22 +323,22 @@ make status
 
 ### Circuit Breaker Pattern
 
-- **Automatic Failure Detection**: Detects when services are down
-- **Fast Failure**: Prevents cascading failures
-- **Automatic Recovery**: Self-healing when services come back online
-- **Performance**: 6.7x faster than traditional error handling
+- **Automatic Failure Detection**: Phát hiện khi services down
+- **Fast Failure**: Ngăn chặn cascading failures
+- **Automatic Recovery**: Tự phục hồi khi services online lại
+- **Performance**: 6.7x nhanh hơn traditional error handling
 
 ### Retry Logic
 
-- **Intelligent Retries**: Only retry on recoverable errors
-- **Exponential Backoff**: Prevents overwhelming failed services
-- **Max Retry Limits**: Prevents infinite retry loops
+- **Intelligent Retries**: Chỉ retry trên recoverable errors
+- **Exponential Backoff**: Ngăn chặn overwhelming failed services
+- **Max Retry Limits**: Ngăn chặn infinite retry loops
 
 ### Health Monitoring
 
-- **Real-time Monitoring**: Continuous health checks
-- **Resource Limits**: Automatic memory and CPU monitoring
-- **Worker Restart**: Automatic worker restart on health issues
+- **Real-time Monitoring**: Health checks liên tục
+- **Resource Limits**: Tự động monitoring memory và CPU
+- **Worker Restart**: Tự động restart worker khi có vấn đề health
 
 ## 🔄 Phase Selection Logic
 
@@ -346,93 +346,93 @@ make status
 
 ```python
 def detect_completed_phases():
-    # Phase 1: Check checkpoint files exist
+    # Phase 1: Kiểm tra checkpoint files tồn tại
     if checkpoint_files_exist():
         phase1_completed = True
 
-    # Phase 2: Check detail_html_storage has records
+    # Phase 2: Kiểm tra detail_html_storage có records
     if detail_html_count > 0:
         phase2_completed = True
 
-    # Phase 3: Check company_details has records
+    # Phase 3: Kiểm tra company_details có records
     if company_details_count > 0:
         phase3_completed = True
 
-    # Phase 4: Check contact_html_storage has records
+    # Phase 4: Kiểm tra contact_html_storage có records
     if contact_html_count > 0:
         phase4_completed = True
 
-    # Phase 5: Check email_extraction has records
+    # Phase 5: Kiểm tra email_extraction có records
     if email_extraction_count > 0:
         phase5_completed = True
 
-    # Phase 6: Check CSV file exists and has data
+    # Phase 6: Kiểm tra CSV file tồn tại và có data
     if csv_exists_and_has_data():
         phase6_completed = True
 ```
 
 ### Manual Phase Selection
 
-- **Phase 1**: Start from link collection
-- **Phase 2**: Start from detail HTML crawling
-- **Phase 3**: Start from company details extraction
-- **Phase 4**: Start from contact pages crawling
-- **Phase 5**: Start from email extraction
-- **Phase 6**: Start from final export
+- **Phase 1**: Bắt đầu từ link collection
+- **Phase 2**: Bắt đầu từ detail HTML crawling
+- **Phase 3**: Bắt đầu từ company details extraction
+- **Phase 4**: Bắt đầu từ contact pages crawling
+- **Phase 5**: Bắt đầu từ email extraction
+- **Phase 6**: Bắt đầu từ final export
 
 ## 🎯 Best Practices
 
 ### Performance Optimization
 
-1. **Use 2 Workers**: Optimal balance of speed and stability
-2. **Monitor Memory**: Keep memory usage under 4GB total
-3. **Use Auto-Detection**: Let system determine starting phase
-4. **Regular Cleanup**: Run `make cleanup-stats` regularly
+1. **Sử dụng 2 Workers**: Cân bằng tối ưu giữa tốc độ và ổn định
+2. **Monitor Memory**: Giữ memory usage dưới 4GB total
+3. **Sử dụng Auto-Detection**: Để hệ thống tự xác định starting phase
+4. **Regular Cleanup**: Chạy `make cleanup-stats` thường xuyên
 
 ### Error Prevention
 
-1. **Start with 1 Worker**: Test with single worker first
-2. **Monitor Logs**: Watch for error patterns
-3. **Use Circuit Breakers**: Automatic failure handling
-4. **Regular Backups**: Backup database before major operations
+1. **Bắt đầu với 1 Worker**: Test với single worker trước
+2. **Monitor Logs**: Theo dõi error patterns
+3. **Sử dụng Circuit Breakers**: Tự động xử lý lỗi
+4. **Regular Backups**: Backup database trước khi thực hiện operations lớn
 
 ### Scaling Guidelines
 
 | Data Size       | Recommended Workers | Expected Time | Memory Usage |
 | --------------- | ------------------- | ------------- | ------------ |
-| < 1k records    | 1 worker            | ~30 min       | ~2GB         |
-| 1k-10k records  | 2 workers           | ~2 hours      | ~4GB         |
-| 10k-50k records | 2-3 workers         | ~8 hours      | ~6GB         |
-| > 50k records   | 3-5 workers         | ~12+ hours    | ~10GB        |
+| < 1k records    | 1 worker            | ~30 phút      | ~2GB         |
+| 1k-10k records  | 2 workers           | ~2 giờ        | ~4GB         |
+| 10k-50k records | 2-3 workers         | ~8 giờ        | ~6GB         |
+| > 50k records   | 3-5 workers         | ~12+ giờ      | ~10GB        |
 
-## 🏆 Key Features
+## 🏆 Tính Năng Chính
 
 ### ✅ **Advanced Features**
 
-- **Phase Selection**: Start from any phase, auto-detect progress
-- **Parallel Processing**: High-performance Celery-based architecture
-- **Circuit Breakers**: Automatic failure detection and recovery
+- **Phase Selection**: Bắt đầu từ bất kỳ phase nào, auto-detect progress
+- **Parallel Processing**: Kiến trúc high-performance dựa trên Celery
+- **Circuit Breakers**: Tự động phát hiện lỗi và recovery
 - **Health Monitoring**: Real-time system health tracking
-- **Intelligent Retries**: Smart retry logic with exponential backoff
-- **Memory Management**: Automatic memory monitoring and cleanup
-- **Database Optimization**: Unique constraints and deduplication
+- **Intelligent Retries**: Smart retry logic với exponential backoff
+- **Memory Management**: Tự động monitoring memory và cleanup
+- **Database Optimization**: Unique constraints và deduplication
 - **Real-time Logging**: Live progress monitoring
 
 ### ✅ **Performance Optimizations**
 
-- **500x faster** health monitoring
-- **40x less** memory usage for circuit breakers
-- **6.7x faster** error handling
-- **3x less** CPU overhead
-- **Infinite speedup** for event loop reuse
+- **500x nhanh hơn** health monitoring
+- **40x ít hơn** memory usage cho circuit breakers
+- **6.7x nhanh hơn** error handling
+- **3x ít hơn** CPU overhead
+- **Infinite speedup** cho event loop reuse
 
 ### ✅ **Reliability Features**
 
 - **Automatic Recovery**: Self-healing system
 - **Error Categorization**: Smart error handling
-- **Resource Limits**: Prevents system overload
-- **Data Integrity**: Unique constraints and validation
-- **Backup & Recovery**: Database migration and cleanup tools
+- **Resource Limits**: Ngăn chặn system overload
+- **Data Integrity**: Unique constraints và validation
+- **Backup & Recovery**: Database migration và cleanup tools
 
 ## 📈 Success Metrics
 
@@ -440,13 +440,13 @@ def detect_completed_phases():
 
 - **20,000+ companies** processed successfully
 - **88 industries** crawled in parallel
-- **99.9% uptime** with circuit breakers
+- **99.9% uptime** với circuit breakers
 - **3GB memory limit** per worker
-- **Sub-second response** for health checks
+- **Sub-second response** cho health checks
 
 ### Scalability Achievements
 
-- **Linear scaling** with worker count
+- **Linear scaling** với worker count
 - **Automatic load balancing** across workers
 - **Memory-efficient** processing
 - **Fault-tolerant** architecture
@@ -501,6 +501,7 @@ def detect_completed_phases():
    ```
 
 4. **Results aggregation**:
+
    ```bash
    # Gộp tất cả CSV files
    python scripts/merge_all_results.py
@@ -508,14 +509,14 @@ def detect_completed_phases():
 
 #### **Expected Performance**:
 
-| Website      | Records  | Time (2 workers) | Memory     | Total Time    |
-| ------------ | -------- | ---------------- | ---------- | ------------- |
-| 1900.com.vn  | 20k      | ~11 hours        | 4GB        |               |
-| Company.vn   | 15k      | ~8 hours         | 3GB        |               |
-| TimViecNhanh | 25k      | ~14 hours        | 5GB        |               |
-| VietnamWorks | 30k      | ~16 hours        | 6GB        |               |
-| TopCV        | 18k      | ~10 hours        | 3.5GB      |               |
-| **TOTAL**    | **108k** | **Parallel**     | **21.5GB** | **~16 hours** |
+| Website      | Records  | Time (2 workers) | Memory     | Total Time  |
+| ------------ | -------- | ---------------- | ---------- | ----------- |
+| 1900.com.vn  | 20k      | ~11 giờ          | 4GB        |             |
+| Company.vn   | 15k      | ~8 giờ           | 3GB        |             |
+| TimViecNhanh | 25k      | ~14 giờ          | 5GB        |             |
+| VietnamWorks | 30k      | ~16 giờ          | 6GB        |             |
+| TopCV        | 18k      | ~10 giờ          | 3.5GB      |             |
+| **TOTAL**    | **108k** | **Parallel**     | **21.5GB** | **~16 giờ** |
 
 #### **Implementation Steps**:
 
