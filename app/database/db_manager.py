@@ -379,14 +379,27 @@ class DatabaseManager:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT id, company_name, company_url, website, facebook
-                FROM company_details 
-                WHERE (website IS NOT NULL AND website != '') 
-                   OR (facebook IS NOT NULL AND facebook != '')
-                ORDER BY id ASC 
+                FROM company_details cd
+                WHERE (
+                    website IS NOT NULL AND website != '' AND NOT EXISTS (
+                        SELECT 1 FROM contact_html_storage ch
+                        WHERE ch.url = cd.website AND ch.url_type = 'website'
+                    )
+                )
+                OR (
+                    facebook IS NOT NULL AND facebook != '' AND NOT EXISTS (
+                        SELECT 1 FROM contact_html_storage ch
+                        WHERE ch.url = cd.facebook AND ch.url_type = 'facebook'
+                    )
+                )
+                ORDER BY id ASC
                 LIMIT ?
-            """, (limit,))
+                """,
+                (limit,),
+            )
             
             records = []
             for row in cursor.fetchall():
