@@ -78,7 +78,7 @@ crawl4ai:
 
 processing:
   # OPTIMIZED SETTINGS FOR BETTER PERFORMANCE
-  batch_size: 75   # Tăng từ 50 lên 75 - tối ưu throughput
+  batch_size: 100   # Tăng từ 50 lên 75 - tối ưu throughput
   write_batch_size: 300  # Tăng từ 200 lên 300 - giảm I/O overhead
   max_concurrent_pages: 6  # Tăng từ 5 lên 6 - tận dụng CPU tốt hơn
   max_retries: 5  # Giữ nguyên
