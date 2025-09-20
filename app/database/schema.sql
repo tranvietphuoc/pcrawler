@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS company_details (
 CREATE TABLE IF NOT EXISTS contact_html_storage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_name TEXT NOT NULL,
-    url TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
     url_type TEXT NOT NULL, -- website, facebook, google
     html_content TEXT NOT NULL,
     crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

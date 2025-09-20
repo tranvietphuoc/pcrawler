@@ -138,12 +138,64 @@ class ContactCrawler(BaseCrawler):
                 return False
     
     async def crawl_batch(self, companies: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Crawl contact pages cho một batch companies"""
-        successful = 0
-        failed = 0
-        results = []
+        """Crawl batch of companies with deduplication - skip already crawled URLs"""
+        if not companies:
+            return {'total': 0, 'successful': 0, 'failed': 0, 'skipped': 0}
         
+        # Extract URLs for batch checking
+        urls = []
         for company in companies:
+            # Check both website and facebook URLs
+            for url_field in ['website', 'facebook']:
+                url = company.get(url_field, '')
+                if url and url not in ("N/A", ""):
+                    if not url.startswith(("http://", "https://")):
+                        url = "https://" + url
+                    urls.append(url)
+        
+        # Batch check which URLs already exist
+        existing_urls = set()
+        if urls:
+            url_exists_map = self.db_manager.check_contact_urls_exist_batch(urls)
+            existing_urls = {url for url, exists in url_exists_map.items() if exists}
+        
+        logger.info(f"Contact batch deduplication: {len(existing_urls)}/{len(urls)} URLs already exist, will skip")
+        
+        # Filter out existing URLs
+        new_companies = []
+        skipped_count = 0
+        for company in companies:
+            company_has_new_urls = False
+            for url_field in ['website', 'facebook']:
+                url = company.get(url_field, '')
+                if url and url not in ("N/A", ""):
+                    if not url.startswith(("http://", "https://")):
+                        url = "https://" + url
+                    if url in existing_urls:
+                        skipped_count += 1
+                        logger.debug(f"Skipping already crawled contact URL: {url}")
+                        continue
+                    else:
+                        company_has_new_urls = True
+            
+            if company_has_new_urls:
+                new_companies.append(company)
+        
+        logger.info(f"After contact deduplication: {len(new_companies)} companies with new URLs to crawl, {skipped_count} URLs skipped")
+        
+        if not new_companies:
+            return {'total': len(companies), 'successful': 0, 'failed': 0, 'skipped': skipped_count}
+        
+        # Crawl only new companies (after deduplication)
+        results = {
+            'total': len(companies),
+            'successful': 0,
+            'failed': 0,
+            'skipped': skipped_count,
+            'details': []
+        }
+        
+        for company in new_companies:
             company_name = company.get('name', '')
             company_url = company.get('url', '')
             website = company.get('website', '')
@@ -153,16 +205,16 @@ class ContactCrawler(BaseCrawler):
             if website and website not in ("N/A", ""):
                 success = await self.crawl_contact_page(website, company_name, 'website')
                 if success:
-                    successful += 1
-                    results.append({
+                    results['successful'] += 1
+                    results['details'].append({
                         'company_name': company_name,
                         'url': website,
                         'url_type': 'website',
                         'status': 'success'
                     })
                 else:
-                    failed += 1
-                    results.append({
+                    results['failed'] += 1
+                    results['details'].append({
                         'company_name': company_name,
                         'url': website,
                         'url_type': 'website',
@@ -173,29 +225,23 @@ class ContactCrawler(BaseCrawler):
             if facebook and facebook not in ("N/A", ""):
                 success = await self.crawl_contact_page(facebook, company_name, 'facebook')
                 if success:
-                    successful += 1
-                    results.append({
+                    results['successful'] += 1
+                    results['details'].append({
                         'company_name': company_name,
                         'url': facebook,
                         'url_type': 'facebook',
                         'status': 'success'
                     })
                 else:
-                    failed += 1
-                    results.append({
+                    results['failed'] += 1
+                    results['details'].append({
                         'company_name': company_name,
                         'url': facebook,
                         'url_type': 'facebook',
                         'status': 'failed'
                     })
         
-        return {
-            'status': 'completed',
-            'total': len(companies),
-            'successful': successful,
-            'failed': failed,
-            'results': results
-        }
+        return results
     
     async def crawl_facebook_with_deep_pages(self, url: str, company_name: str) -> bool:
         """Crawl Facebook page với deep crawling (About, Contact, etc.)"""

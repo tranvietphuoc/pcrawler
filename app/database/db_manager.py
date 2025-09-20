@@ -83,6 +83,27 @@ class DatabaseManager:
             else:
                 raise
 
+    def check_contact_urls_exist_batch(self, urls: List[str]) -> Dict[str, bool]:
+        """Check multiple contact URLs at once for better performance"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Create placeholders for IN clause
+                placeholders = ','.join(['?' for _ in urls])
+                cursor.execute(f"""
+                    SELECT url FROM contact_html_storage 
+                    WHERE url IN ({placeholders})
+                """, urls)
+                existing_urls = {row[0] for row in cursor.fetchall()}
+                return {url: url in existing_urls for url in urls}
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                logger.warning(f"Database locked, retrying check_contact_urls_exist_batch")
+                time.sleep(0.1)
+                return self.check_contact_urls_exist_batch(urls)
+            else:
+                raise
+
     def store_detail_html(self, company_name: str, company_url: str, html_content: str, industry: str = None) -> int:
         """Store detail page HTML content and return record ID"""
         try:
@@ -126,9 +147,15 @@ class DatabaseManager:
                 conn.commit()
                 return record_id
         except sqlite3.IntegrityError as e:
-            # No unique constraint for contact_html_storage, just log and continue
-            logger.warning(f"Integrity error for contact HTML: {e}")
-            raise
+            if "UNIQUE constraint failed" in str(e):
+                logger.info(f"URL already exists in contact_html_storage, skipping: {url}")
+                # Return existing record ID
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM contact_html_storage WHERE url = ?", (url,))
+                result = cursor.fetchone()
+                return result[0] if result else None
+            else:
+                raise
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e):
                 logger.warning(f"Database locked, retrying store_contact_html for {company_name}")
