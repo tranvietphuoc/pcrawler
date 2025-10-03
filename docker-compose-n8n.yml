@@ -9,15 +9,18 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=pcrawler123
-      - N8N_HOST=117.79.202.225
-      # - N8N_HOST=localhost
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_SKIP_OWNER_SETUP=true
+      - N8N_OWNER_EMAIL=admin@pcrawler.com
+      - N8N_OWNER_FIRST_NAME=Admin
+      - N8N_OWNER_LAST_NAME=User
+      - N8N_OWNER_PASSWORD=Pcrawler123
+      # - N8N_HOST=115.79.202.225
+      - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://117.79.202.225:5678/
-      # - WEBHOOK_URL=http://localhost:5678/
+      # - WEBHOOK_URL=http://115.79.202.225:5678/
+      - WEBHOOK_URL=http://localhost:5678/
       - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
     volumes:
       - n8n_data:/home/node/.n8n
@@ -43,6 +46,7 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
+    command: tail -f /dev/null
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -91,17 +95,17 @@ services:
 
   # Flower (Celery monitoring)
   flower:
-    build: .
+    image: mher/flower:latest
     container_name: pcrawler-flower
     restart: unless-stopped
     depends_on:
       - redis
-    command: celery -A app.tasks.celery_app flower --port=5555
+    command: celery flower --broker=redis://redis:6379/0 --port=5555 --address=0.0.0.0 --persistent=true
     ports:
       - "5555:5555"
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=admin:pcrawler123
     networks:
       - pcrawler-network
 
