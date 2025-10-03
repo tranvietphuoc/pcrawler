@@ -1,0 +1,114 @@
+version: "3.8"
+
+services:
+  # N8N Orchestrator
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: pcrawler-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=pcrawler123
+      - N8N_HOST=117.79.202.225
+      # - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://117.79.202.225:5678/
+      # - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n_workflow_docker.json:/home/node/.n8n/workflows/pcrawler.json
+    networks:
+      - pcrawler-network
+
+  # Redis for N8N
+  redis:
+    image: redis:7-alpine
+    container_name: pcrawler-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - pcrawler-network
+
+  # PCrawler (existing)
+  pcrawler:
+    build: .
+    container_name: pcrawler-app
+    restart: unless-stopped
+    depends_on:
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./app:/app/app
+    networks:
+      - pcrawler-network
+
+  # Celery Worker
+  celery-worker:
+    build: .
+    container_name: pcrawler-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./app:/app/app
+    networks:
+      - pcrawler-network
+
+  # Celery Beat (scheduler)
+  celery-beat:
+    build: .
+    container_name: pcrawler-beat
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./app:/app/app
+    networks:
+      - pcrawler-network
+
+  # Flower (Celery monitoring)
+  flower:
+    build: .
+    container_name: pcrawler-flower
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: celery -A app.tasks.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    networks:
+      - pcrawler-network
+
+volumes:
+  n8n_data:
+  redis_data:
+
+networks:
+  pcrawler-network:
+    driver: bridge
