@@ -35,22 +35,22 @@ help:
 # Build Docker images
 build:
 	@echo "Building Docker images..."
-	docker-compose build
+	docker compose build
 
 # Start all services (except crawler_app which runs on demand)
 up:
 	@echo "Starting background services..."
-	docker-compose up -d redis worker
+	docker compose up -d redis worker
 
 # Stop all services
 down:
 	@echo "Stopping all services..."
-	docker-compose down
+	docker compose down
 
 # Show logs
 logs:
 	@echo "Showing logs from all services..."
-	docker-compose logs -f
+	docker compose logs -f
 
 # Show logs using run_crawler script
 logs-script:
@@ -60,7 +60,7 @@ logs-script:
 # Show status
 status:
 	@echo "Current status:"
-	@docker-compose ps
+	@docker compose ps
 	@echo ""
 	@echo "Data directory status:"
 	@if [ -d "data" ]; then \
@@ -75,7 +75,7 @@ status:
 # Clean up
 clean:
 	@echo "Cleaning up containers and volumes..."
-	docker-compose down -v
+	docker compose down -v
 	docker system prune -f
 
 # Interactive mode
@@ -86,9 +86,9 @@ run:
 # Database cleanup commands
 cleanup-stats:
 	@echo "Showing database stats..."
-	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --stats-only
+	docker compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py --stats-only
 
 cleanup-all:
 	@echo "Running full database cleanup..."
-	docker-compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py
+	docker compose run --rm -T crawler_app python /app/app/utils/dedup_cleanup.py
 

@@ -90,12 +90,12 @@ run_crawler() {
         print_warning "Force restart enabled - will start from Phase 1"
     fi
     
-    # Build command using docker-compose run with real-time output
+    # Build command using docker compose run with real-time output
     local cmd=""
     if [ "$force_restart" = "true" ]; then
-        cmd="docker-compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase 1 --force-restart --config $config"
+        cmd="docker compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase 1 --force-restart --config $config"
     else
-        cmd="docker-compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase $phase --config $config"
+        cmd="docker compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase $phase --config $config"
     fi
     
     print_info "Executing: $cmd"
@@ -112,7 +112,7 @@ run_crawler() {
     
     # Show real-time logs while crawler is running
     print_info "Showing real-time logs from running containers..."
-    docker-compose logs -f &
+    docker compose logs -f &
     local logs_pid=$!
     
     # Wait for crawler to complete
@@ -132,7 +132,7 @@ run_crawler() {
     # Show recent logs
     echo ""
     print_info "Recent logs:"
-    docker-compose logs --tail=50
+    docker compose logs --tail=50
 }
 
 # Function to show current status
@@ -140,7 +140,7 @@ show_status() {
     print_info "Checking current crawler status..."
     
     # Check if containers are running
-    if docker-compose ps | grep -q "Up"; then
+    if docker compose ps | grep -q "Up"; then
         print_success "Docker containers are running"
     else
         print_warning "Docker containers are not running"
@@ -212,7 +212,7 @@ main() {
     # Show logs if requested
     if [ "$show_logs_flag" = "true" ]; then
         print_info "Showing logs from running containers..."
-        docker-compose logs -f
+        docker compose logs -f
         exit 0
     fi
     
@@ -264,7 +264,7 @@ main() {
     # Scale workers if needed
     if [ "$scale" != "1" ]; then
         print_info "Scaling workers to $scale instances..."
-        docker-compose up -d --scale worker=$scale
+        docker compose up -d --scale worker=$scale
         print_info "Waiting 5 seconds for workers to start..."
         sleep 5
     fi
