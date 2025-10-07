@@ -26,7 +26,7 @@ services:
       - n8n_data:/home/node/.n8n
       - ./n8n_workflow_docker.json:/home/node/.n8n/workflows/pcrawler.json
     networks:
-      - pcrawler-network
+      - abenla_shared
 
   # Redis for N8N
   redis:
@@ -37,7 +37,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - pcrawler-network
+      - abenla_shared
 
   # PCrawler (existing)
   pcrawler:
@@ -55,7 +55,7 @@ services:
       - ./config:/app/config
       - ./app:/app/app
     networks:
-      - pcrawler-network
+      - abenla_shared
 
   # Celery Worker
   celery-worker:
@@ -73,7 +73,7 @@ services:
       - ./config:/app/config
       - ./app:/app/app
     networks:
-      - pcrawler-network
+      - abenla_shared
 
   # Celery Beat (scheduler)
   celery-beat:
@@ -91,7 +91,7 @@ services:
       - ./config:/app/config
       - ./app:/app/app
     networks:
-      - pcrawler-network
+      - abenla_shared
 
   # Flower (Celery monitoring)
   flower:
@@ -107,12 +107,13 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - FLOWER_BASIC_AUTH=admin:pcrawler123
     networks:
-      - pcrawler-network
+      - abenla_shared
 
 volumes:
   n8n_data:
   redis_data:
 
 networks:
-  pcrawler-network:
-    driver: bridge
+  abenla_shared:
+    external: true
+    name: abenla_shared

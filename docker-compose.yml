@@ -10,7 +10,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - crawler_network
+      - abenla_shared
     deploy:
       resources:
         limits:
@@ -42,7 +42,7 @@ services:
     depends_on:
       - redis
     networks:
-      - crawler_network
+      - abenla_shared
     deploy:
       resources:
         limits:
@@ -69,7 +69,7 @@ services:
       - redis
       - worker
     networks:
-      - crawler_network
+      - abenla_shared
     deploy:
       resources:
         limits:
@@ -84,5 +84,6 @@ volumes:
   redis_data:
 
 networks:
-  crawler_network:
-    driver: bridge
+  abenla_shared:
+    external: true
+    name: abenla_shared
