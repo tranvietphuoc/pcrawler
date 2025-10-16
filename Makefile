@@ -18,6 +18,7 @@ help:
 	@echo ""
 	@echo "Crawler commands:"
 	@echo "  make run               - Interactive phase and scale selection (RECOMMENDED)"
+	@echo "  make export            - Run Phase 6 (export) only"
 	@echo ""
 	@echo "Database commands:"
 	@echo "  make cleanup-stats     - Show database stats only"
@@ -82,6 +83,11 @@ clean:
 run:
 	@echo "Starting interactive crawler..."
 	./run_crawler.sh
+
+# Export only (Phase 6)
+export:
+	@echo "Running export (Phase 6)..."
+	docker compose run --rm -T crawler_app python -c 'import asyncio; from app.main import run; asyncio.run(run("1900comvn", start_phase=6))'
 
 # Database cleanup commands
 cleanup-stats:

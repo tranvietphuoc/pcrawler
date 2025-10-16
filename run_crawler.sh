@@ -36,7 +36,7 @@ show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --phase PHASE     Start from specific phase (1,2,3,4,5,auto)"
+    echo "  --phase PHASE     Start from specific phase (1,2,3,4,5,6,auto)"
     echo "  --force-restart   Force restart from Phase 1"
     echo "  --config CONFIG   Config name (default: 1900comvn)"
     echo "  --scale N         Scale workers to N instances (default: 1)"
@@ -46,9 +46,10 @@ show_help() {
     echo "Phases:"
     echo "  1    - Crawl links for all industries"
     echo "  2    - Crawl detail pages from links"
-    echo "  3    - Crawl contact pages from company details"
-    echo "  4    - Extract company details and emails"
-    echo "  5    - Export final CSV"
+    echo "  3    - Extract company details from detail HTML"
+    echo "  4    - Crawl contact pages from company details"
+    echo "  5    - Extract emails from contact HTML"
+    echo "  6    - Export final CSV"
     echo "  auto - Auto-detect starting phase (recommended)"
     echo ""
     echo "Examples:"
@@ -57,6 +58,7 @@ show_help() {
     echo "  $0 --phase 1 --force-restart       # Force restart from Phase 1"
     echo "  $0 --phase auto --config myconfig  # Use custom config with auto phase"
     echo "  $0 --phase 3 --scale 5             # Start Phase 3 with 5 workers"
+    echo "  $0 --phase 6                       # Export only"
     echo "  $0 --logs                          # Show logs from running containers"
 }
 
@@ -64,7 +66,7 @@ show_help() {
 validate_phase() {
     local phase=$1
     case $phase in
-        1|2|3|4|5|auto)
+        1|2|3|4|5|6|auto)
             return 0
             ;;
         *)
@@ -95,7 +97,12 @@ run_crawler() {
     if [ "$force_restart" = "true" ]; then
         cmd="docker compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase 1 --force-restart --config $config"
     else
-        cmd="docker compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase $phase --config $config"
+        if [ "$phase" = "6" ]; then
+            # main.py CLI does not accept phase=6; call run() directly
+            cmd="docker compose run --rm --no-deps -T crawler_app python -c 'import asyncio; from app.main import run; asyncio.run(run(\"$config\", start_phase=6))'"
+        else
+            cmd="docker compose run --rm --no-deps -T crawler_app python -m app.main crawl --phase $phase --config $config"
+        fi
     fi
     
     print_info "Executing: $cmd"
@@ -225,15 +232,16 @@ main() {
         echo "Please select a phase to start from:"
         echo "  1) Phase 1 - Crawl links for all industries"
         echo "  2) Phase 2 - Crawl detail pages from links"
-        echo "  3) Phase 3 - Crawl contact pages from company details"
-        echo "  4) Phase 4 - Extract company details and emails"
-        echo "  5) Phase 5 - Export final CSV"
+        echo "  3) Phase 3 - Extract company details"
+        echo "  4) Phase 4 - Crawl contact pages"
+        echo "  5) Phase 5 - Extract emails"
+        echo "  6) Phase 6 - Export final CSV"
         echo "  a) Auto-detect starting phase (recommended)"
         echo "  f) Force restart from Phase 1"
         echo "  h) Show help"
         echo "  q) Quit"
         echo ""
-        read -p "Enter your choice (1-5, a, f, h, q): " choice
+        read -p "Enter your choice (1-6, a, f, h, q): " choice
         
         case $choice in
             1) phase="1" ;;
@@ -241,6 +249,7 @@ main() {
             3) phase="3" ;;
             4) phase="4" ;;
             5) phase="5" ;;
+            6) phase="6" ;;
             a|A) phase="auto" ;;
             f|F) phase="1"; force_restart="true" ;;
             h|H) show_help; exit 0 ;;
