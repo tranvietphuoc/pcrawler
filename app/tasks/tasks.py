@@ -672,7 +672,7 @@ def get_database_stats():
 @celery_app.task(name="final.export", bind=True)
 def export_final_csv(self):
     """
-    Phase 5: Join các bảng và xuất CSV cuối cùng theo cột yêu cầu
+    Phase 6: Join các bảng và xuất CSV cuối cùng theo cột yêu cầu
     Columns: industry, company_name, company_url, address, phone, website, facebook,
              linkedin, tiktok, youtube, instagram, created_year, revenue, scale,
              extracted_email, email_source, confidence_score
@@ -681,10 +681,34 @@ def export_final_csv(self):
         config = CrawlerConfig()
         output_path = config.output_config.get("final_output", "data/final.csv")
         db = DatabaseManager()
+        
         with db.get_connection() as conn:
+            # Debug: Check table counts first
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM company_details")
+            company_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM detail_html_storage")
+            detail_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM email_extraction")
+            email_count = cursor.fetchone()[0]
+            
+            logger.info(f"Debug counts - company_details: {company_count}, detail_html_storage: {detail_count}, email_extraction: {email_count}")
+            
+            # Check for missing detail_html_id
+            cursor.execute("SELECT COUNT(*) FROM company_details WHERE detail_html_id IS NULL")
+            null_detail_id = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM company_details cd WHERE NOT EXISTS (SELECT 1 FROM detail_html_storage d WHERE d.id = cd.detail_html_id)")
+            missing_detail = cursor.fetchone()[0]
+            
+            logger.info(f"Debug - null detail_html_id: {null_detail_id}, missing detail records: {missing_detail}")
+            
+            # Use LEFT JOIN to avoid losing records
             query = """
                 SELECT 
-                    d.industry AS industry,
+                    COALESCE(d.industry, 'Unknown') AS industry,
                     cd.company_name,
                     cd.company_url,
                     cd.address,
@@ -702,11 +726,14 @@ def export_final_csv(self):
                     e.email_source,
                     e.confidence_score
                 FROM company_details cd
-                JOIN detail_html_storage d ON cd.detail_html_id = d.id
-                LEFT JOIN email_extraction e ON e.company_name = cd.company_name
+                LEFT JOIN detail_html_storage d ON cd.detail_html_id = d.id
+                LEFT JOIN email_extraction e ON LOWER(TRIM(e.company_name)) = LOWER(TRIM(cd.company_name))
                 ORDER BY cd.company_name
             """
+            
+            logger.info(f"Executing export query...")
             df = pd.read_sql_query(query, conn)
+            logger.info(f"Query returned {len(df)} rows")
             # explode emails if JSON array to one row per email
             def split_emails(val):
                 try:
@@ -741,6 +768,8 @@ def export_final_csv(self):
                     for em in emails[:5]:  # Limit to maximum 5 emails per company
                         rows.append({**r.to_dict(), 'extracted_email': em})
             out_df = pd.DataFrame(rows)
+            logger.info(f"After email processing: {len(out_df)} rows")
+            
             # Ensure columns order
             cols = [
                 'industry','company_name','company_url','address','phone','website','facebook',
@@ -748,11 +777,25 @@ def export_final_csv(self):
                 'extracted_email','email_source','confidence_score'
             ]
             out_df = out_df.reindex(columns=cols)
+            
+            # Create output directory if not exists
+            import os
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
             out_df.to_csv(output_path, index=False)
+            logger.info(f"CSV exported to: {output_path} with {len(out_df)} rows")
+            
         return {
             'status': 'completed',
             'rows': len(out_df),
-            'output': output_path
+            'output': output_path,
+            'debug_info': {
+                'company_details_count': company_count,
+                'detail_html_storage_count': detail_count,
+                'email_extraction_count': email_count,
+                'null_detail_id_count': null_detail_id,
+                'missing_detail_count': missing_detail
+            }
         }
     except Exception as e:
         logger.error(f"Final export failed: {e}")
